@@ -54,16 +54,20 @@ documented as PHPStan array shapes) and return typed models. Every method takes 
 
 `Transport` is a one-method interface (`send(Request): Response`). `CurlTransport` is the default:
 `CURLOPT_FOLLOWLOCATION` off (the bearer never reaches another host; a `3xx` is a
-`ServiceException` `http_3xx`), TLS peer and host verification on, protocols limited to `https`
+`ServiceException` `unexpected_redirect`), TLS peer and host verification on, protocols limited to `https`
 (plus `http` for local hosts), `CURLOPT_NOSIGNAL`, an empty `Expect:` header,
 `CURLOPT_TIMEOUT_MS` set to the attempt's timeout and `CURLOPT_CONNECTTIMEOUT_MS` to at most 10 s,
-one reused handle for keep-alive. Request bodies are JSON objects: an empty body or `metadata`
+one reused handle for keep-alive, and a write callback that stops reading one byte past 1 MiB.
+The client refuses any body over 1 MiB, whatever the transport (`invalid_response`). Ids passed
+to path methods must match `^[a-z]+_[A-Za-z0-9_-]+$` (an `InvalidArgumentException` before any
+request), so `.` and `..` never reach a path. Request bodies are JSON objects: an empty body or `metadata`
 is sent as `{}`. The base URL is normalised (`scheme://host[:port][/path]`, lower-case scheme and
 host) and rejected with control characters or whitespace; errors never echo it.
 Every request sends `Authorization: Bearer sk_…`, `Accept` and `Content-Type`
 `application/json`, `User-Agent: n1co-epay-php/<version> php/<major.minor>` (plus `app_info`) and
 a new UUID v4 `X-Request-Id` per attempt. The default base URL is `https://api-epay.n1co.com`;
-`https` is required except for `localhost`, `127.0.0.1` and `[::1]`. The timeout is per attempt (default
+`https` is required; plain `http` is accepted only for `localhost`, `127.0.0.1` and `[::1]` (any
+port). The timeout is per attempt (default
 30 s); `refunds->create()` uses at least 90 s unless the call sets one.
 
 ### Retries
@@ -80,10 +84,11 @@ errors, timeouts, `429` and `5xx`. `Retry-After` (seconds or an HTTP date) is wa
 `headers(): array`; `getCode()` stays the int status (0 without a response). Subclasses follow
 the status: `400` and other `4xx` `InvalidRequestException`, `401`/`403`
 `AuthenticationException`, `404` `NotFoundException`, `409` `ConflictException`, `429`
-`RateLimitException`, `5xx`, `3xx` and unreadable answers `ServiceException`
-(`invalid_response`), no response `ConnectionException` (`connection_error`, `timeout`),
-`WebhookSignatureException` for rejected deliveries. A body without an error object gets
-`http_<status>`. Configuration mistakes (bad key format, options, webhook secret, negative
+`RateLimitException`, `5xx`, `3xx` (`unexpected_redirect`) and unreadable answers
+`ServiceException` (`invalid_response`: not JSON, over 1 MiB or not the model), no response `ConnectionException` (`connection_error`, `timeout`),
+`WebhookSignatureException` for rejected deliveries (`missing_header`, `invalid_timestamp`,
+`timestamp_out_of_tolerance`, `invalid_signature`, `invalid_payload`). A body without an error
+object gets `http_<status>`. These SDK-only codes are the same in the Node, .NET and PHP SDKs. Configuration mistakes (bad key format, options, webhook secret, negative
 tolerance) are `InvalidArgumentException`.
 
 ### Models

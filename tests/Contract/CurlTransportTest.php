@@ -38,8 +38,20 @@ final class CurlTransportTest extends TestCase
             $this->client(['max_retries' => 0])->events->list();
             self::fail('Expected a ServiceException.');
         } catch (ServiceException $e) {
-            self::assertSame('http_302', $e->code());
+            self::assertSame('unexpected_redirect', $e->code());
             self::assertCount(1, $this->fake->requests());
+        }
+    }
+
+    public function testStopsReadingABodyOver1MiB(): void
+    {
+        $this->fake->force(200, ['data' => [], 'pad' => str_repeat('x', 4 * 1024 * 1024)]);
+        try {
+            $this->client(['max_retries' => 0])->events->list();
+            self::fail('Expected a ServiceException.');
+        } catch (ServiceException $e) {
+            self::assertSame('invalid_response', $e->code());
+            self::assertSame(200, $e->status());
         }
     }
 

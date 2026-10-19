@@ -7,13 +7,13 @@ namespace N1co\EPay\Service;
 /** @internal */
 final class PathId
 {
-    /** Encodes an object id for a path segment; rejects empty ids early. */
+    /** Checks an object id (`^[a-z]+_[A-Za-z0-9_-]+$`) before any request; it is then safe in a path. */
     public static function encode(string $id, string $name = 'id'): string
     {
-        if (trim($id) === '') {
-            throw new \InvalidArgumentException(\sprintf('%s must be a non-empty string.', $name));
+        if (preg_match('/^[a-z]+_[A-Za-z0-9_-]+\z/', $id) !== 1) {
+            throw new \InvalidArgumentException(\sprintf('%s must look like prefix_… (for example pi_…).', $name));
         }
 
-        return rawurlencode($id);
+        return $id;
     }
 }

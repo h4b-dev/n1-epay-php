@@ -21,6 +21,8 @@ final class HttpClient
     /** Longest `Retry-After` the SDK waits for by itself; a longer one is left to the caller. */
     public const MAX_RETRY_AFTER_SECONDS = 30;
     public const MAX_MAX_RETRIES = 10;
+    /** Largest response body the SDK reads (1 MiB); a larger one is a ServiceException `invalid_response`. */
+    public const MAX_RESPONSE_BYTES = 1024 * 1024;
     private const INITIAL_BACKOFF_MS = 500;
     private const MAX_BACKOFF_MS = 4000;
     private const RETRY_AFTER_JITTER_MS = 250;
@@ -103,6 +105,15 @@ final class HttpClient
             try {
                 $response = $this->transport->send($request);
                 $echoed = $response->header('x-request-id') ?? $requestId;
+                if (\strlen($response->body) > self::MAX_RESPONSE_BYTES) {
+                    throw new ServiceException(
+                        \sprintf('The n1co ePay API answered HTTP %d with a body over %d bytes.', $response->status, self::MAX_RESPONSE_BYTES),
+                        'invalid_response',
+                        status: $response->status,
+                        requestId: $echoed,
+                        headers: $response->headers,
+                    );
+                }
                 if ($response->status >= 200 && $response->status < 300) {
                     return self::decode($response->status, $response->headers, $response->body, $echoed, $map);
                 }

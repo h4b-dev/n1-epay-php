@@ -53,6 +53,9 @@ final class ClientTest extends TestCase
     public static function badBaseUrls(): iterable
     {
         yield 'http' => ['http://api-epay.n1co.com'];
+        yield 'http lookalike host' => ['http://localhost.evil.example'];
+        yield 'http private address' => ['http://10.0.0.1:8080'];
+        yield 'http any address' => ['http://0.0.0.0:8080'];
         yield 'not a url' => ['api-epay.n1co.com'];
         yield 'query' => ['https://api-epay.n1co.com?x=1'];
         yield 'fragment' => ['https://api-epay.n1co.com#x'];
@@ -78,6 +81,14 @@ final class ClientTest extends TestCase
         yield 'localhost' => ['http://LOCALHOST:3000', 'http://localhost:3000'];
         yield 'loopback' => ['http://127.0.0.1:8080/', 'http://127.0.0.1:8080'];
         yield 'ipv6 loopback' => ['http://[::1]:8080', 'http://[::1]:8080'];
+        yield 'loopback without port' => ['http://127.0.0.1', 'http://127.0.0.1'];
+    }
+
+    public function testANullBaseUrlMeansProduction(): void
+    {
+        $transport = new FakeTransport(FakeTransport::json(200, ['data' => []]));
+        TestClient::make($transport, ['base_url' => null])->events->list();
+        self::assertSame(N1co::DEFAULT_BASE_URL . '/v1/events', $transport->last()->url);
     }
 
     #[DataProvider('goodBaseUrls')]

@@ -6,6 +6,20 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- A `3xx` answer is a `ServiceException` with the code `unexpected_redirect` (was
+  `http_<status>`), as in the Node and .NET SDKs.
+- Response bodies over 1 MiB are refused with `ServiceException` `invalid_response`;
+  `CurlTransport` stops reading one byte past the limit.
+- Ids passed to `retrieve`, `cancel` and `resend` must look like `prefix_…`
+  (`^[a-z]+_[A-Za-z0-9_-]+$`); anything else is an `InvalidArgumentException` before any request
+  (ids were URL-encoded before).
+- `base_url` may be `null`, meaning the production default.
+- README: one errors table shape (class, HTTP status, API codes, SDK-only codes), every webhook
+  verification code, 256 KiB raw-body caps in the webhook examples, and the environments and
+  local `http` hosts stated as in the other SDKs.
+
 ## [0.1.0] - Unreleased
 
 ### Added

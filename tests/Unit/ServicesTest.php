@@ -112,14 +112,21 @@ final class ServicesTest extends TestCase
         self::assertSame(5.0, $transport->last()->timeout);
     }
 
-    public function testEncodesIdsAndRejectsEmptyOnes(): void
+    public function testChecksIdsBeforeAnyRequest(): void
     {
         $transport = new FakeTransport(FakeTransport::json(200, Examples::refund()));
-        TestClient::make($transport)->refunds->retrieve('re_a/b?c');
-        self::assertStringEndsWith('/v1/refunds/re_a%2Fb%3Fc', $transport->last()->url);
+        TestClient::make($transport)->refunds->retrieve('re_Ab-9_x');
+        self::assertStringEndsWith('/v1/refunds/re_Ab-9_x', $transport->last()->url);
+        $sent = \count($transport->requests);
 
-        $this->expectException(\InvalidArgumentException::class);
-        TestClient::make($transport)->paymentIntents->retrieve(' ');
+        foreach (['', ' ', 're_', '_x', 'RE_x', 're', '.', '..', 're_a/../b', 're_a?b', 're_a.b', "re_a\n"] as $bad) {
+            try {
+                TestClient::make($transport)->refunds->retrieve($bad);
+                self::fail('Expected an InvalidArgumentException for ' . json_encode($bad));
+            } catch (\InvalidArgumentException) {
+            }
+        }
+        self::assertCount($sent, $transport->requests);
     }
 
     public function testCreateReturnsTheClientSecretOnce(): void

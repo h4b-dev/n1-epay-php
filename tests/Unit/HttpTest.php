@@ -91,7 +91,6 @@ final class HttpTest extends TestCase
         yield '429' => [429, RateLimitException::class];
         yield '500' => [500, ServiceException::class];
         yield '503' => [503, ServiceException::class];
-        yield '302' => [302, ServiceException::class];
     }
 
     /**
@@ -136,9 +135,51 @@ final class HttpTest extends TestCase
             TestClient::make($transport)->events->list();
             self::fail('Expected an exception.');
         } catch (ServiceException $e) {
-            self::assertSame('http_301', $e->code());
+            self::assertSame('unexpected_redirect', $e->code());
+            self::assertSame(301, $e->status());
             self::assertCount(1, $transport->requests);
         }
+    }
+
+    public function testARedirectIgnoresItsBody(): void
+    {
+        $transport = new FakeTransport(FakeTransport::error(302, 'some_code'));
+        try {
+            TestClient::make($transport)->events->list();
+            self::fail('Expected an exception.');
+        } catch (ServiceException $e) {
+            self::assertSame('unexpected_redirect', $e->code());
+        }
+    }
+
+    /**
+     * @return iterable<string, array{int}>
+     */
+    public static function statusesWithLargeBodies(): iterable
+    {
+        yield 'success' => [200];
+        yield 'error' => [500];
+    }
+
+    #[DataProvider('statusesWithLargeBodies')]
+    public function testABodyOver1MiBIsRefusedAndNotRetried(int $status): void
+    {
+        $transport = new FakeTransport(new Response($status, [], str_repeat(' ', 1024 * 1024 + 1)));
+        try {
+            TestClient::make($transport, ['max_retries' => 2])->events->list();
+            self::fail('Expected an exception.');
+        } catch (ServiceException $e) {
+            self::assertSame('invalid_response', $e->code());
+            self::assertSame($status, $e->status());
+            self::assertCount(1, $transport->requests);
+        }
+    }
+
+    public function testABodyOfExactly1MiBIsRead(): void
+    {
+        $json = '{"data":[]}';
+        $transport = new FakeTransport(new Response(200, [], $json . str_repeat(' ', 1024 * 1024 - \strlen($json))));
+        self::assertCount(0, TestClient::make($transport)->events->list());
     }
 
     /**

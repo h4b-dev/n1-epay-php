@@ -18,7 +18,7 @@ composer require n1co/epay
 use N1co\EPay\N1co;
 
 $n1co = new N1co((string) getenv('N1CO_SECRET_KEY'), [
-    'base_url' => getenv('N1CO_BASE_URL') ?: N1co::DEFAULT_BASE_URL,
+    'base_url' => getenv('N1CO_BASE_URL') ?: null, // omit in production
 ]);
 
 $intent = $n1co->paymentIntents->create([
@@ -40,25 +40,26 @@ Never send the secret key to a browser.
 
 ## Environments
 
-| Environment | `base_url`                                |
-| ----------- | ----------------------------------------- |
-| Production  | `https://api-epay.n1co.com` (the default) |
-| Development | `https://api-epay.dev.n1co.dev`           |
+Production: omit `base_url` (opens later; the default is the production host). Development: pass
+`https://api-epay.dev.n1co.dev`.
 
-`N1co::DEFAULT_BASE_URL` and `N1co::DEV_BASE_URL` hold them. The production host is to be
-confirmed before 1.0.
+The base URL must use `https`. Plain `http` is accepted only for `http://localhost`,
+`http://127.0.0.1` and `http://[::1]` (any port), to test against a local API.
+
+`N1co::DEFAULT_BASE_URL` and `N1co::DEV_BASE_URL` hold them; `null` means the default.
 
 ## Client options
 
 | Option        | Default                     | Notes                                                  |
 | ------------- | --------------------------- | ------------------------------------------------------ |
-| `base_url`    | `https://api-epay.n1co.com` | `https` only (`http` for `localhost`, `127.0.0.1`, `[::1]`). |
+| `base_url`    | the production host         | See [Environments](#environments).                     |
 | `timeout`     | `30`                        | Seconds per attempt. `refunds->create()` waits ≥ 90 s. |
 | `max_retries` | `2`                         | GET only, 0 to 10. See [Retries](#retries).            |
 | `app_info`    | none                        | `['name' => …, 'version' => …, 'url' => …]`, sent in the `User-Agent`. |
 | `transport`   | `CurlTransport`             | Any `N1co\EPay\Http\Transport`.                        |
 
-Every API method takes a last `['timeout' => seconds]` argument.
+Every API method takes a last `['timeout' => seconds]` argument. Ids are checked (`prefix_…`,
+for example `pi_…`) before any request; response bodies over 1 MiB are refused.
 
 ## Integration flow
 
@@ -123,7 +124,8 @@ $n1co->webhooks->test();                     // sends a webhook.test event to yo
 ### Verify deliveries
 
 Deliveries are signed with [Standard Webhooks](https://www.standardwebhooks.com/). Verify the
-**raw body**, before any JSON parsing, with your `whsec_…` secret:
+**raw body**, before any JSON parsing, with your `whsec_…` secret. Read at most 256 KiB: n1co's
+events are far smaller.
 
 ```php
 use N1co\EPay\Exception\WebhookSignatureException;
@@ -131,13 +133,16 @@ use N1co\EPay\Model\EventType;
 use N1co\EPay\Model\PaymentIntentEventObject;
 use N1co\EPay\Webhook;
 
+const MAX_WEBHOOK_BODY = 256 * 1024;
+
+$payload = (string) file_get_contents('php://input', length: MAX_WEBHOOK_BODY + 1); // the raw bytes
+if (\strlen($payload) > MAX_WEBHOOK_BODY) {
+    http_response_code(413);
+    exit;
+}
 try {
-    $event = Webhook::constructEvent(
-        file_get_contents('php://input'),
-        getallheaders(),
-        (string) getenv('N1CO_WEBHOOK_SECRET'),
-    );
-} catch (WebhookSignatureException $e) {
+    $event = Webhook::constructEvent($payload, getallheaders(), (string) getenv('N1CO_WEBHOOK_SECRET'));
+} catch (WebhookSignatureException) {
     http_response_code(400);
     exit;
 }
@@ -147,11 +152,20 @@ if ($event->type === EventType::PAYMENT_INTENT_SUCCEEDED) {
 http_response_code(204);
 ```
 
-It throws `WebhookSignatureException` when a header is missing, the timestamp is more than
-5 minutes away (the 4th argument, in seconds, changes it), no signature matches or the body is
-not an event envelope. **Answer `400` only for that exception**; any other failure is yours
-(answer `5xx`, n1co retries). Answer `2xx` quickly and deduplicate on `$event->id`: delivery is
-at least once and not ordered.
+`constructEvent` throws `WebhookSignatureException`, with `code()`:
+
+| `code()`                     | Meaning                                                                       |
+| ---------------------------- | ----------------------------------------------------------------------------- |
+| `missing_header`             | `webhook-id`, `webhook-timestamp` or `webhook-signature` is missing.          |
+| `invalid_timestamp`          | `webhook-timestamp` is not a Unix time in seconds.                            |
+| `timestamp_out_of_tolerance` | The timestamp is more than 5 minutes away, either way (4th argument, in s).   |
+| `invalid_signature`          | No `v1,` signature matches the body.                                          |
+| `invalid_payload`            | The signed body is not an n1co ePay event.                                    |
+
+An unusable secret (empty, or not base64 after `whsec_`) is a programming error: it throws an
+`InvalidArgumentException`, never `WebhookSignatureException`. **Answer `400` only for
+`WebhookSignatureException`**; any other failure is yours (answer `5xx`, n1co retries). Answer
+`2xx` quickly and deduplicate on `$event->id`: delivery is at least once and not ordered.
 
 `$event->data->object` is a `Card` (`card.created`, `card.updated`), `PaymentIntentEventObject`
 (`payment_intent.*`), `Refund` (`refund.*`) or `WebhookTestObject` (`webhook.test`). For a type
@@ -169,9 +183,11 @@ use N1co\EPay\Exception\WebhookSignatureException;
 use N1co\EPay\Webhook;
 
 Route::post('/webhooks/n1co', function (Request $request) {
+    $payload = $request->getContent(); // the raw body
+    abort_if(\strlen($payload) > 256 * 1024, 413);
     try {
         $event = Webhook::constructEvent(
-            $request->getContent(),
+            $payload,
             $request->headers->all(),
             (string) config('services.n1co.webhook_secret'),
         );
@@ -193,8 +209,12 @@ use Symfony\Component\HttpFoundation\Response;
 
 public function n1co(Request $request): Response
 {
+    $payload = $request->getContent(); // the raw body
+    if (\strlen($payload) > 256 * 1024) {
+        return new Response('', Response::HTTP_REQUEST_ENTITY_TOO_LARGE);
+    }
     try {
-        $event = Webhook::constructEvent($request->getContent(), $request->headers->all(), $this->webhookSecret);
+        $event = Webhook::constructEvent($payload, $request->headers->all(), $this->webhookSecret);
     } catch (WebhookSignatureException) {
         return new Response('', Response::HTTP_BAD_REQUEST);
     }
@@ -203,6 +223,9 @@ public function n1co(Request $request): Response
 }
 ```
 
+PHP has already buffered `getContent()` within the server's limits (`post_max_size`, the web
+server's body limit); keep those near 256 KiB on the webhook route too.
+
 ## Errors
 
 Every exception extends `N1co\EPay\Exception\N1coException`, with `code()` (the API's stable
@@ -210,16 +233,25 @@ code), `getMessage()`, `details()` (for example `details()['field']`), `status()
 `requestId()`, `retryAfter()` and `headers()`. `getCode()` is the HTTP status (0 without one).
 Branch on `code()` and `details()`, never on the message.
 
-| Class                       | Status    | Typical `code()`                                                        |
-| --------------------------- | --------- | ----------------------------------------------------------------------- |
-| `InvalidRequestException`   | 400 (4xx) | `invalid_request` (see `details()['field']`, `details()['code']`)       |
-| `AuthenticationException`   | 401, 403  | `invalid_api_key`                                                       |
-| `NotFoundException`         | 404       | `payment_intent_not_found`, `refund_not_found`, `card_not_found`, …     |
-| `ConflictException`         | 409       | `card_unavailable`, `payment_intent_not_cancelable`, `refund_exists`, … |
-| `RateLimitException`        | 429       | `rate_limited` (see `retryAfter()`)                                     |
-| `ServiceException`          | 5xx       | `n1co_api_unavailable`, `platform_access_pending`, `invalid_response`   |
-| `ConnectionException`       | none      | `connection_error`, `timeout`: the outcome is unknown                   |
-| `WebhookSignatureException` | none      | `missing_header`, `invalid_signature`, `timestamp_out_of_tolerance`, …  |
+| Class                       | HTTP status          | Typical API `code()`                                                | SDK-only `code()`                           |
+| --------------------------- | -------------------- | ------------------------------------------------------------------- | ------------------------------------------- |
+| `InvalidRequestException`   | 400 (and other 4xx)  | `invalid_request` (see `details()['field']`, `details()['code']`)   |                                             |
+| `AuthenticationException`   | 401, 403             | `invalid_api_key`                                                   |                                             |
+| `NotFoundException`         | 404                  | `*_not_found` (`payment_intent_not_found`, `refund_not_found`, …)   |                                             |
+| `ConflictException`         | 409                  | `card_unavailable`, `refund_exists`, `delivery_in_progress`, …      |                                             |
+| `RateLimitException`        | 429                  | `rate_limited` (see `retryAfter()`)                                 |                                             |
+| `ServiceException`          | 5xx, 3xx, unreadable | `n1co_api_unavailable`, `platform_access_pending`, `internal_error` | `unexpected_redirect`, `invalid_response`   |
+| `ConnectionException`       | none                 |                                                                     | `connection_error`, `timeout`               |
+| `WebhookSignatureException` | none                 |                                                                     | see [Verify deliveries](#verify-deliveries) |
+
+The SDK's own codes:
+
+- `unexpected_redirect`: the API answered `3xx`. Redirects are never followed; check the base URL.
+- `invalid_response`: the answer could not be read: not JSON, over 1 MiB, or not the expected
+  object.
+- `connection_error`, `timeout`: no answer was received. The outcome of a POST is unknown.
+- `http_<status>` (for example `http_502`): an error answer without an API error body, from a
+  proxy for example. The class still follows the status.
 
 Quote `requestId()` when contacting n1co. Results carry it too: `$result->lastResponse->requestId`.
 

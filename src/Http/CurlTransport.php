@@ -5,12 +5,14 @@ declare(strict_types=1);
 namespace N1co\EPay\Http;
 
 use N1co\EPay\Exception\ConnectionException;
+use N1co\EPay\Internal\HttpClient;
 use N1co\EPay\N1co;
 
 /**
  * The default Transport, on ext-curl. It never follows redirects (the secret key must not be
  * sent to another host), verifies TLS certificates and host names, allows plain http only for
- * local hosts, and limits every attempt to the request's timeout (connecting to at most 10 s).
+ * local hosts, limits every attempt to the request's timeout (connecting to at most 10 s) and
+ * stops reading a body one byte past HttpClient::MAX_RESPONSE_BYTES (the client then refuses it).
  * One handle is reused so connections are kept alive.
  */
 final class CurlTransport implements Transport
@@ -40,10 +42,26 @@ final class CurlTransport implements Transport
 
             return \strlen($line);
         };
-        curl_setopt_array($handle, self::options($request, $onHeader));
+        $body = '';
+        $truncated = false;
+        $onBody = static function (\CurlHandle $handle, string $chunk) use (&$body, &$truncated): int {
+            $body .= $chunk;
+            if (\strlen($body) > HttpClient::MAX_RESPONSE_BYTES) {
+                $body = substr($body, 0, HttpClient::MAX_RESPONSE_BYTES + 1);
+                $truncated = true;
 
-        $body = curl_exec($handle);
-        if (!\is_string($body)) {
+                return 0; // stop the transfer: the client refuses a body this large
+            }
+
+            return \strlen($chunk);
+        };
+        curl_setopt_array($handle, self::options($request, $onHeader, $onBody));
+
+        $ok = curl_exec($handle);
+        if ($truncated) {
+            return new Response(curl_getinfo($handle, CURLINFO_RESPONSE_CODE), $responseHeaders, $body);
+        }
+        if ($ok === false) {
             $errno = curl_errno($handle);
             $timedOut = $errno === CURLE_OPERATION_TIMEDOUT;
 
@@ -64,11 +82,12 @@ final class CurlTransport implements Transport
      *
      * @internal
      *
-     * @param \Closure(\CurlHandle, string): int $onHeader
+     * @param \Closure(\CurlHandle, string): int      $onHeader
+     * @param (\Closure(\CurlHandle, string): int)|null $onBody   Receives the body; without it curl returns it.
      *
      * @return array<int, mixed>
      */
-    public static function options(#[\SensitiveParameter] Request $request, \Closure $onHeader): array
+    public static function options(#[\SensitiveParameter] Request $request, \Closure $onHeader, ?\Closure $onBody = null): array
     {
         $headers = ['Expect:']; // no 100-continue round trip
         foreach ($request->headers as $name => $value) {
@@ -90,6 +109,10 @@ final class CurlTransport implements Transport
             CURLOPT_CONNECTTIMEOUT_MS => min(self::MAX_CONNECT_TIMEOUT_MS, $timeoutMs),
             CURLOPT_HEADERFUNCTION => $onHeader,
         ];
+        if ($onBody !== null) {
+            unset($options[CURLOPT_RETURNTRANSFER]);
+            $options[CURLOPT_WRITEFUNCTION] = $onBody;
+        }
         $protocolsStr = \defined('CURLOPT_PROTOCOLS_STR') ? \constant('CURLOPT_PROTOCOLS_STR') : null; // PHP 8.3+, libcurl 7.85+
         if (\is_int($protocolsStr)) {
             $options[$protocolsStr] = $local ? 'https,http' : 'https';

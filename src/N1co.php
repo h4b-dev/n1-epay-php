@@ -45,12 +45,13 @@ final class N1co
     /**
      * @param string $secretKey The store's secret key (`sk_` and 32 characters). Server side only.
      * @param array{
-     *     base_url?: string,
+     *     base_url?: string|null,
      *     timeout?: int|float,
      *     max_retries?: int,
      *     app_info?: array{name: string, version?: string, url?: string},
      *     transport?: Transport,
-     * } $options `base_url` (default production; `https` only, `http` for localhost),
+     * } $options `base_url` (null or omitted: production; `https` only, plain `http` only for
+     *            localhost, 127.0.0.1 and [::1], any port),
      *            `timeout` per attempt in seconds (default 30; refunds->create() at least 90),
      *            `max_retries` of GET requests (default 2, 0 to 10; POST is never retried),
      *            `app_info` sent in the User-Agent, `transport` (default CurlTransport).

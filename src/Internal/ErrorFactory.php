@@ -23,6 +23,15 @@ final class ErrorFactory
     public static function fromResponse(Response $response, ?string $requestId, ?int $now = null): N1coException
     {
         $status = $response->status;
+        if ($status >= 300 && $status < 400) {
+            return new ServiceException(
+                \sprintf('The n1co ePay API answered with a redirect (HTTP %d); the SDK never follows redirects. Check the base URL.', $status),
+                'unexpected_redirect',
+                status: $status,
+                requestId: $requestId,
+                headers: $response->headers,
+            );
+        }
         $error = null;
         try {
             $body = json_decode($response->body, true, 64, JSON_THROW_ON_ERROR);
@@ -49,7 +58,7 @@ final class ErrorFactory
             $status === 429 => RateLimitException::class,
             $status >= 500 => ServiceException::class,
             $status >= 400 => InvalidRequestException::class,
-            default => ServiceException::class, // 1xx and 3xx: redirects are never followed
+            default => ServiceException::class, // 1xx
         };
 
         return new $class(
