@@ -1,0 +1,2896 @@
+openapi: 3.1.0
+info:
+  title: n1co ePay API
+  version: "0.10.0"
+  description: |
+    Partner-facing payments API in front of the n1co Integration API v3.
+    Errors are JSON: `{"error":{"code":"...","message":"...","details":{...}}}`;
+    `details` is present only for some codes.
+
+    Events are delivered to the store's webhook URL as described in
+    `x-webhooks`.
+
+    Every `/v1` endpoint except `POST /v1/setup`, `/v1/capture` and the
+    SDK endpoints `/v1/payment_intents/retrieve`,
+    `/v1/payment_intents/confirm` and `/v1/payment_intents/complete`
+    requires the store's secret key (`Authorization: Bearer sk_...`);
+    responses to them carry `Cache-Control: no-store`. `/v1/capture` and
+    the SDK endpoints are called only by the n1co SDK (its loader and the
+    frames it serves from n1co's origin) through the tokenization proxy;
+    the partner's page owns every piece of UI around them. Validation errors are `400 invalid_request`
+    with `details.field` and a stable `details.code`, for the first failing
+    field only. Messages never echo submitted values.
+
+    Partners never manage customers as a resource: the customer travels
+    inline, with your own customer id, in `POST /v1/card_sessions` and
+    `POST /v1/payment_intents`, and is created or updated by its id. No
+    response or event ever returns a customer; n1co receives your id.
+security:
+  - secretKey: []
+paths:
+  /v1/setup:
+    post:
+      operationId: setup
+      security: []
+      summary: Enable a partner store
+      description: |
+        One-time, idempotent setup of the partner's store. The n1co application
+        credentials in the body are the only authentication; the client secret
+        is used to call `POST /api/v3/Token` on the n1co Integration API and is
+        never stored. Rerunning re-verifies roles and platform access, and is
+        how the store is rebound to a new application, how keys are rotated
+        and how the webhook URL is changed. Secrets are returned only by the
+        call that issues them.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SetupRequest"
+      responses:
+        "201":
+          description: Store enabled. Every key is returned once.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupResponse"
+              example:
+                store_id: 0b9f8a52-2f0e-4d84-9a52-6c1f7e0d9a11
+                store_name: Example Store
+                publishable_key: pk_3x4mpl3pUbl1shabl3k3yAAAAAAAAAAA
+                secret_key: sk_3x4mpl3s3cr3tk3yAAAAAAAAAAAAAAAA
+                webhook:
+                  url: https://hooks.example.com/n1co
+                  secret: whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw
+        "200":
+          description: |
+            Existing store updated (rebound to a new client_id, webhook URL
+            changed, or a key rotated). `secret_key` is present only when it
+            was rotated; `webhook.secret` only when a new one was issued (a new
+            webhook URL always issues one).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SetupResponse"
+        "400":
+          description: |
+            `invalid_request`: invalid body or webhook URL; the message names
+            the field. Keys must match the documented names exactly
+            (case-sensitive). The webhook host is resolved only after the
+            credentials and roles are verified, and every DNS failure gives
+            the same message: "webhook_url host is not reachable from n1co".
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: "`invalid_credentials`: n1co rejected the credentials, or the token was issued to another application."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: |
+            `store_already_enabled`: nothing to change (details carry
+            `store_id` and `publishable_key`). `client_id_in_use`: the
+            client_id is bound to another store. `setup_conflict`: a concurrent
+            setup changed the store; retry.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: store_already_enabled
+                  message: the store is already enabled; pass rotate_secret_key or rotate_webhook_secret, or a new webhook_url, to change it
+                  details:
+                    store_id: 0b9f8a52-2f0e-4d84-9a52-6c1f7e0d9a11
+                    publishable_key: pk_3x4mpl3pUbl1shabl3k3yAAAAAAAAAAA
+        "413":
+          description: "`request_too_large`: body over 16 KiB."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "415":
+          description: "`unsupported_media_type`: Content-Type is not application/json."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: |
+            `missing_roles`: the application lacks `EPay.ReadWrite.OwnedBy`
+            and/or `Store.Read.OwnedBy` (`details.missing_roles` lists them),
+            or n1co refused to enable platform access ("the application is
+            missing roles required by n1co", no details).
+            `client_app_not_found`: n1co does not know the application.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: missing_roles
+                  message: the application is missing required roles
+                  details:
+                    missing_roles: [EPay.ReadWrite.OwnedBy]
+        "429":
+          description: |
+            `rate_limited`: too many setup attempts for this client_id
+            (default 5 per minute) or in total (default 60 per minute). No
+            call was made to n1co.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          description: "`internal_error`."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: |
+            `n1co_api_unavailable` (Retry-After 30), `platform_access_pending`
+            (Retry-After 30 or 60; the platform credential is not usable yet),
+            `platform_certificate_mismatch` (service misconfiguration, no
+            Retry-After). Nothing was stored; retry later.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/card_sessions:
+    post:
+      operationId: createCardSession
+      summary: Authorise a card capture, or a saved card update, for a customer
+      description: |
+        Creates a card session for a customer of the authenticated store. The
+        customer travels inline with your own id: the first request with an
+        id creates the customer, later ones replace its name, email and
+        phone. Pass
+        `client_secret` to the n1co SDK's card element in the buyer's browser; it
+        is returned only here, valid for one card, until `expires_at`
+        (`CARD_SESSION_TTL`, default 15 minutes) and for `attempts_remaining`
+        capture attempts. Never send the secret key to a browser.
+
+        Without `card` the session saves a new card (`mode` `capture`).
+        With `card`, a saved, `active` card of the customer with this
+        `customer.id`, the session updates that card (`mode` `update`):
+        the payer types the new expiry and the security code (and,
+        optionally, the cardholder name) in n1co's frames, never the
+        number, and the card keeps its id and fingerprint. Use it for a
+        reissued card (same number, new expiry and code). The card is
+        checked before the customer is written, so a refused request
+        changes nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CardSessionCreateRequest"
+            examples:
+              capture:
+                value:
+                  customer:
+                    id: cust-1001
+                    name: Ana López
+                    email: ana.lopez@example.com
+                    phone: "+503 7000-1234"
+              update:
+                value:
+                  customer:
+                    id: cust-1001
+                    name: Ana López
+                    email: ana.lopez@example.com
+                    phone: "+503 7000-1234"
+                  card: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+      responses:
+        "201":
+          description: Session created.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CardSessionCreated"
+              examples:
+                capture:
+                  value:
+                    id: cs_U2Vzc2lvbkV4YW1wbGUwMDAx
+                    client_secret: cs_U2Vzc2lvbkV4YW1wbGUwMDAx_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+                    mode: capture
+                    card: null
+                    status: requires_card
+                    attempts_remaining: 5
+                    page_origins: null
+                    expires_at: "2026-10-16T15:19:05Z"
+                update:
+                  value:
+                    id: cs_VXBkYXRlU2Vzc2lvbkV4YW1w
+                    client_secret: cs_VXBkYXRlU2Vzc2lvbkV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+                    mode: update
+                    card: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                    status: requires_card
+                    attempts_remaining: 5
+                    page_origins: null
+                    expires_at: "2026-10-16T15:19:05Z"
+        "400":
+          $ref: "#/components/responses/InvalidRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: |
+            `card_not_found`: `card` is not a card of the customer with this
+            `customer.id` (cards of other customers of the store, of a
+            customer id not seen before and of other stores are reported the
+            same way).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: |
+            `card_unavailable`: `card` is `unavailable` (n1co no longer knows
+            it); capture the card again with a capture session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /v1/card_sessions/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^cs_[A-Za-z0-9_-]{24}$"
+    get:
+      operationId: getCardSession
+      summary: Retrieve a card session
+      responses:
+        "200":
+          description: The session. `status` is `expired` once `expires_at` has passed without a card.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CardSession"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/CardSessionNotFound"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /v1/capture:
+    post:
+      operationId: capture
+      security:
+        - proxyKey: []
+      summary: Capture a card (n1co SDK only)
+      description: |
+        Called by the n1co SDK's card element through the tokenization proxy,
+        never by partners. The proxy replaces `card.number` and `card.cvc`
+        with vault aliases and adds `X-N1co-Proxy-Key`; `client_secret`
+        identifies and authorises the card session. Every value given for
+        `card.number` and `card.cvc` must be an alias (matching
+        `CAPTURE_ALIAS_PATTERN`, not 3-19 digits, no run of 12 or more
+        digits); this is checked right after the body is read, before
+        anything else, and otherwise the answer is `503
+        capture_not_tokenized` and nothing is sent to n1co. Repeated keys
+        anywhere in the body are rejected.
+
+        On a capture session (`mode` `capture`) the card is saved on n1co
+        as a reusable payment method for the session's customer, sent with
+        your customer id, name, email and phone as they are stored when
+        the capture runs. Attempts that fail validation, are rejected or
+        succeed count against the session; when none are left it is
+        canceled. A capture holds the session while it talks to n1co; a
+        concurrent capture answers `409 card_session_in_progress`. When the
+        result on n1co cannot be known the session is canceled and the
+        answer is `503 capture_outcome_unknown`: start again with a new
+        session.
+
+        On an update session (`mode` `update`) `card` carries `cvc`,
+        `exp_month`, `exp_year` and optionally `name`, never `number`
+        (`400 number_not_allowed`, even when null): n1co's saved payment
+        method is updated with them (n1co requires the security code on
+        every update; the stored cardholder name is sent when `name` is
+        absent), the card keeps its id and fingerprint, its expiry and name
+        are stored, and a `card.updated` event is sent. The answer is
+        `200`. When n1co says it no longer knows the card (in a `200` or a
+        `4xx`) it becomes `unavailable`, the session is canceled and the
+        answer is `409 card_unavailable`. A refusal by n1co is `422
+        card_rejected` and counts an attempt; when n1co is unavailable or
+        gives no usable answer the card stays as stored, the session keeps
+        waiting and the attempt does not count (`503
+        n1co_api_unavailable`): an update creates nothing, so there is no
+        unknown outcome to cancel the session for. Two update sessions of
+        one card may be open at once; the last successful update wins.
+
+        CORS: requests from an origin in `CAPTURE_ALLOWED_ORIGINS` get
+        `Access-Control-Allow-Origin` with that origin and `Vary: Origin`
+        (no credentials). Every response carries `Cache-Control: no-store`.
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          schema:
+            type: string
+          description: Must be exactly one of the allowed origins.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CaptureRequest"
+            examples:
+              capture:
+                value:
+                  client_secret: cs_U2Vzc2lvbkV4YW1wbGUwMDAx_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+                  card:
+                    number: tok_sandbox_Q2FyZE51bWJlckFsaWFz
+                    cvc: tok_sandbox_U2VjdXJpdHlDb2RlQWxpYXM
+                    exp_month: 12
+                    exp_year: 2030
+                    name: Ana Pérez
+                    last4: "4242"
+                    brand: visa
+              update:
+                value:
+                  client_secret: cs_VXBkYXRlU2Vzc2lvbkV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+                  card:
+                    cvc: tok_sandbox_U2VjdXJpdHlDb2RlQWxpYXM
+                    exp_month: 11
+                    exp_year: 2031
+      responses:
+        "200":
+          description: The saved card of an update session was updated; the session is completed.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaptureResponse"
+              example:
+                card:
+                  id: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                  brand: visa
+                  last4: "4242"
+                  exp_month: 11
+                  exp_year: 2031
+                session:
+                  id: cs_VXBkYXRlU2Vzc2lvbkV4YW1w
+                  mode: update
+                  status: completed
+        "201":
+          description: |
+            Card saved; the session is completed. n1co gives the same card
+            number the same payment method, so capturing a card the
+            customer already has returns that card (its expiry and name
+            updated when they changed) and sends no second `card.created`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CaptureResponse"
+              example:
+                card:
+                  id: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                  brand: visa
+                  last4: "4242"
+                  exp_month: 12
+                  exp_year: 2030
+                session:
+                  id: cs_U2Vzc2lvbkV4YW1wbGUwMDAx
+                  mode: capture
+                  status: completed
+        "400":
+          description: |
+            `invalid_request`: the body is not one JSON object, or a field is
+            invalid. `details.field` is `card` or `card.<key>` (or the dotted
+            path of a repeated key) and `details.code` one of
+            `duplicate_field`, `unknown_field`, `missing_card`,
+            `invalid_card`, `missing_number`, `invalid_number`,
+            `number_not_allowed` (a number on an update session), `missing_cvc`,
+            `invalid_cvc`, `missing_exp_month`, `invalid_exp_month`,
+            `missing_exp_year`, `invalid_exp_year`, `card_expired`,
+            `missing_name`, `invalid_name`, `missing_last4`, `invalid_last4`,
+            `missing_brand`, `invalid_brand`, `invalid_page_origin`. Card fields are checked in the
+            order number, cvc, exp_month, exp_year, name, last4, brand; on
+            an update session only cvc, exp_month, exp_year and name are
+            accepted (`last4` and `brand` are unknown fields).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          description: "`invalid_proxy_key`: the request did not come through the tokenization proxy."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: |
+            `origin_not_allowed`: missing or disallowed `Origin`; no CORS
+            headers are sent. `page_origin_not_allowed`: the session has
+            `page_origins` and `page_origin` is missing or not one of them;
+            no attempt is counted.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: "`card_session_not_found`: the client secret is malformed, unknown or wrong."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: |
+            `card_session_completed`: the session already captured (or
+            updated) a card. `card_session_in_progress`: another capture for
+            the session is talking to n1co. `card_unavailable` (update
+            sessions): n1co no longer knows the card; it is now
+            `unavailable` and the session is canceled.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "410":
+          description: "`card_session_expired` or `card_session_canceled` (canceled or no attempts left). Ask the partner for a new session."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "422":
+          description: "`card_rejected`: n1co refused the card. The message is fixed; the attempt counts."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: |
+            `rate_limited`: more than 60 failed session lookups per minute
+            from the source address (the connection, or the first
+            `X-Forwarded-For` entry when `CAPTURE_TRUST_FORWARDED_FOR` is
+            on), or, once the client secret matched, more than 10 captures
+            per minute for the session or `CAPTURE_RATE_LIMIT_GLOBAL`
+            (default 300) in total.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+        "503":
+          description: |
+            `n1co_api_unavailable` (Retry-After 10; the attempt does not
+            count), `platform_access_pending` (the store's platform
+            credential is not usable; no Retry-After),
+            `capture_not_tokenized` (the card values were not vault aliases;
+            nothing was sent to n1co), or `capture_outcome_unknown` (n1co may
+            have saved the card but gave no usable answer; the session is
+            canceled; no Retry-After, start a new session).
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    options:
+      operationId: capturePreflight
+      security: []
+      summary: CORS preflight for the n1co SDK
+      parameters:
+        - name: Origin
+          in: header
+          required: true
+          schema:
+            type: string
+      responses:
+        "204":
+          description: Allowed origin.
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+            Access-Control-Allow-Methods:
+              schema:
+                type: string
+                const: POST, OPTIONS
+            Access-Control-Allow-Headers:
+              schema:
+                type: string
+                const: Content-Type
+            Access-Control-Max-Age:
+              schema:
+                type: string
+                const: "600"
+            Vary:
+              schema:
+                type: string
+                const: Origin
+        "403":
+          description: "`origin_not_allowed`, without CORS headers."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/payment_intents:
+    post:
+      operationId: createPaymentIntent
+      summary: Create a payment intent
+      description: |
+        States what a customer of the authenticated store owes. The customer
+        travels inline with your own id, as for card sessions: it is created
+        or updated (name, email and phone replaced) by this request. Pass
+        `client_secret` to the n1co SDK in the payer's browser; it is
+        returned only here and is valid until the intent succeeds, is
+        canceled or expires (`PAYMENT_INTENT_TTL`, default 1 hour). Never
+        send the secret key to a browser. No call is made to n1co.
+
+        `payment_method` attaches a saved card of the customer with the given
+        `customer.id`,
+        chosen by your server (the browser never picks a saved card). The
+        SDK then confirms with the client secret alone to charge it, or
+        with a new card typed in its card element. The card must be
+        `active` and stays attached for the life of the intent; the intent
+        is returned with `card` set to it and `payment_method` showing it
+        with `saved: true`.
+
+        `cvc_required: true` (only with `payment_method`) makes the SDK ask
+        the payer for the attached card's security code: a confirm that
+        charges the attached card without `card.cvc` is refused. The code is
+        typed in n1co's frames and travels as a vault alias, never through
+        your server; it is registered for the saved card at n1co right
+        before the charge.
+
+        `amount` is in minor units of `currency`. Only currencies with two
+        decimal places are supported. Once the store's currency is known
+        (from its first successful charge), intents in another currency are
+        refused.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentIntentCreateRequest"
+            example:
+              amount: 1250
+              currency: USD
+              customer:
+                id: cust-1001
+                name: Ana López
+                email: ana.lopez@example.com
+                phone: "+503 7000-1234"
+              description: Order 8812
+              reference: order-8812
+              metadata:
+                cart: c-1029
+              payment_method: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+              cvc_required: true
+      responses:
+        "201":
+          description: Intent created, with its client secret.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentIntentCreated"
+              example:
+                id: pi_UGF5bWVudEludGVudEV4YW1w
+                object: payment_intent
+                client_secret: pi_UGF5bWVudEludGVudEV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+                status: requires_payment_method
+                amount: 1250
+                currency: USD
+                description: Order 8812
+                reference: order-8812
+                metadata: {cart: c-1029}
+                billing: null
+                page_origins: null
+                card: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                payment_method: {brand: visa, last4: "4242", exp_month: 12, exp_year: 2030, saved: true}
+                cvc_required: true
+                next_action: null
+                last_error: null
+                attempts_remaining: 3
+                authorization_code: null
+                order_id: null
+                cancellation_reason: null
+                refund: null
+                created_at: "2026-10-17T15:04:05Z"
+                updated_at: "2026-10-17T15:04:05Z"
+                succeeded_at: null
+                canceled_at: null
+                expires_at: "2026-10-17T16:04:05Z"
+        "400":
+          description: |
+            `invalid_request`: the body is not one JSON object, or
+            `details.code` is one of `unknown_field`, `missing_amount`,
+            `invalid_amount`, `missing_currency`, `invalid_currency`,
+            `currency_not_supported` (a valid code whose minor unit is not
+            2), `currency_mismatch` (the store charges in another currency),
+            `missing_customer`, `invalid_customer` (not an object), the
+            customer field codes of `CustomerInput` (with `details.field`
+            `customer.id`, `customer.name`, `customer.email` or
+            `customer.phone`; unknown keys inside `customer` answer
+            `unknown_field` with `details.field` `customer.<key>`),
+            `invalid_description`,
+            `invalid_reference`, `invalid_metadata`, `invalid_billing`,
+            `missing_country`, `invalid_country`, `invalid_state`,
+            `invalid_postal_code`, `invalid_page_origins`,
+            `invalid_payment_method` (not a `card_` id),
+            `invalid_cvc_required` (not a boolean),
+            `cvc_required_without_card` (`cvc_required: true` without
+            `payment_method`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: |
+            `card_not_found`: `payment_method` is not a card of the customer
+            with this `customer.id` (cards of other customers of the store,
+            of a customer id not seen before and of other stores are reported
+            the same way).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: |
+            `card_unavailable`: the `payment_method` card is `unavailable`
+            (n1co no longer knows it); capture the card again or let the
+            payer type a new card.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /v1/payment_intents/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^pi_[A-Za-z0-9_-]{24}$"
+    get:
+      operationId: getPaymentIntent
+      summary: Retrieve a payment intent
+      description: |
+        The intent, without its client secret. Due transitions are applied
+        before it is returned: an expired intent is `canceled` (`expired`),
+        and an intent whose 3D Secure deadline passed is back to
+        `requires_payment_method` with `last_error.code`
+        `authentication_expired`.
+      responses:
+        "200":
+          description: The intent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentIntent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/PaymentIntentNotFound"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /v1/payment_intents/{id}/cancel:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^pi_[A-Za-z0-9_-]{24}$"
+    post:
+      operationId: cancelPaymentIntent
+      summary: Cancel a payment intent
+      description: |
+        Cancels an intent that is `requires_payment_method` or
+        `requires_action` (`cancellation_reason` `requested`) and sends
+        `payment_intent.canceled`. No body is needed. A pending 3D Secure
+        authentication is never completed afterwards.
+      responses:
+        "200":
+          description: The canceled intent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentIntent"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/PaymentIntentNotFound"
+        "409":
+          description: |
+            `payment_intent_not_cancelable`: the intent is `processing`,
+            `succeeded` or `canceled` (`details.status`).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /v1/payment_intents/retrieve:
+    post:
+      operationId: retrievePaymentIntentSDK
+      security:
+        - proxyKey: []
+      summary: Read an intent (n1co SDK only)
+      description: |
+        Called by the n1co SDK through the tokenization proxy, never by
+        partners. Returns the client view of the intent identified by
+        `client_secret`, which shows the attached card (if any) in
+        `payment_method`. Saved cards are never listed to the browser.
+
+        Shared rules of the SDK endpoints: `X-N1co-Proxy-Key` is required;
+        CORS as for `/v1/capture` (`CAPTURE_ALLOWED_ORIGINS`, preflight with
+        `OPTIONS`); bodies up to 16 KiB with exact keys and no repeated
+        keys; every `card.number` and `card.cvc` value must be a vault
+        alias (`503 capture_not_tokenized` otherwise, checked first); a
+        malformed, unknown or wrong client secret answers `404
+        payment_intent_not_found`. Every body may carry `page_origin`, the
+        origin of the partner page embedding the SDK as its frame learned
+        it from its handshake; when the intent has `page_origins` it must be
+        one of them (`403 page_origin_not_allowed`). Failed lookups are limited to 60 per
+        minute per source address (shared with `/v1/capture`); once the
+        client secret matched, 10 requests per minute per intent and
+        `CHECKOUT_RATE_LIMIT_GLOBAL` (default 300) in total. Every response
+        carries `Cache-Control: no-store`.
+      parameters:
+        - $ref: "#/components/parameters/Origin"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [client_secret]
+              properties:
+                client_secret:
+                  type: string
+                page_origin:
+                  $ref: "#/components/schemas/PageOrigin"
+      responses:
+        "200":
+          description: The client view of the intent.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentIntentClient"
+        "400":
+          $ref: "#/components/responses/SDKInvalidRequest"
+        "401":
+          $ref: "#/components/responses/InvalidProxyKey"
+        "403":
+          $ref: "#/components/responses/SDKForbidden"
+        "404":
+          $ref: "#/components/responses/PaymentIntentNotFound"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/SDKRateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+        "503":
+          $ref: "#/components/responses/ChargeUnavailable"
+    options:
+      operationId: retrievePaymentIntentSDKPreflight
+      security: []
+      summary: CORS preflight for the n1co SDK
+      parameters:
+        - $ref: "#/components/parameters/Origin"
+      responses:
+        "204":
+          $ref: "#/components/responses/Preflight"
+        "403":
+          $ref: "#/components/responses/OriginNotAllowed"
+  /v1/payment_intents/confirm:
+    post:
+      operationId: confirmPaymentIntentSDK
+      security:
+        - proxyKey: []
+      summary: Pay an intent (n1co SDK only)
+      description: |
+        Called by the n1co SDK through the tokenization proxy (shared rules
+        under `POST /v1/payment_intents/retrieve`). The intent must be
+        `requires_payment_method`; the confirm consumes one attempt.
+
+        `card` has one of three shapes. Without `card` the card attached at
+        creation (`payment_method` on create) is charged; when nothing is
+        attached the answer is `400
+        invalid_request` with `details.code` `payment_method_required`, and
+        when the attached card is `unavailable`, `409 card_unavailable`.
+        With `card` holding `cvc` alone, the attached card is charged with
+        its security code (see below). With a full `card`, a new card typed in the SDK's card element, whose
+        `number` and `cvc` the proxy replaced with vault aliases (validated
+        as in `/v1/capture`), is charged for this attempt only and is never
+        saved: a card the customer already saved (same expiry, not expired)
+        is charged as that saved card; otherwise it is registered at n1co
+        as single use, or as reusable when another customer of the store
+        saved it (single use is best effort). `card` must be that object: a
+        saved card id is refused (`invalid_card`); saved cards are attached
+        by your server. `billing`, when given, replaces the intent's
+        billing.
+
+        `{"cvc": "<alias>"}` alone in `card` is the attached card's security
+        code, typed in n1co's frames and replaced with a vault alias by the
+        proxy like any `card.cvc` (checked before anything else). It is
+        accepted only on an intent with an attached card (`400
+        invalid_request`, `details.code` `cvc_without_saved_card`), and
+        required when the intent has `cvc_required` and no new card is
+        given (`details.code` `cvc_required`; no attempt is consumed and
+        nothing is sent to n1co). A full new card is still accepted on an
+        intent with `cvc_required`: the requirement only applies to paying
+        with the attached card. `cvc` with other fields but no `number` is
+        an incomplete new card (`missing_number`). When given, the code is registered for the saved card at
+        n1co first and the card is then charged as usual. When n1co refuses
+        it the attempt fails with `last_error.code` `card_update_failed`
+        (or `card_unavailable` when n1co no longer knows the card, which
+        becomes `unavailable`); nothing was charged. When n1co gives no
+        answer about it (`401`/`403`, `429`, `5xx`, no answer, a request
+        never sent) the attempt is given back with `503` (see
+        `ChargeUnavailable`). A new card equal to the attached one on an
+        intent with `cvc_required` is charged as the saved card after its
+        `card.cvc` is registered the same way.
+
+        The answer is `200` with the client view for every attempt whose
+        outcome is known: `succeeded`, `requires_action` (n1co requires 3D
+        Secure) or `requires_payment_method` with `last_error`. Errors mean
+        the attempt did not happen or was given back. When `next_action` is
+        present the SDK frames `next_action.three_ds.url`, accepts only
+        messages whose `event.origin` is that URL's origin, parses
+        `event.data` (a JSON string), checks `AuthenticationId`, and reports
+        the result with `POST /v1/payment_intents/complete`; it reports
+        `expired` after 10 minutes without a message.
+
+        When n1co's answer cannot be known the intent stays `processing`
+        with `last_error.code` `outcome_unknown`. After a 3 minute hold one
+        more confirm is accepted and re-sends the same charge (`card` and
+        `billing` are then ignored); n1co's order id makes that safe.
+
+        n1co can take up to two minutes: allow at least 150 seconds.
+      parameters:
+        - $ref: "#/components/parameters/Origin"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentIntentConfirmRequest"
+            examples:
+              newCard:
+                value:
+                  client_secret: pi_UGF5bWVudEludGVudEV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+                  card:
+                    number: tok_sandbox_Q2FyZE51bWJlckFsaWFz
+                    cvc: tok_sandbox_U2VjdXJpdHlDb2RlQWxpYXM
+                    exp_month: 12
+                    exp_year: 2030
+                    name: Ana Pérez
+                    last4: "2701"
+                    brand: visa
+              attachedCard:
+                value:
+                  client_secret: pi_UGF5bWVudEludGVudEV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+              attachedCardWithCode:
+                value:
+                  client_secret: pi_UGF5bWVudEludGVudEV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+                  card:
+                    cvc: tok_sandbox_U2VjdXJpdHlDb2RlQWxpYXM
+      responses:
+        "200":
+          description: The client view of the intent after the attempt.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentIntentClient"
+              example:
+                id: pi_UGF5bWVudEludGVudEV4YW1w
+                object: payment_intent
+                status: requires_action
+                amount: 1250
+                currency: USD
+                description: Order 8812
+                payment_method: {brand: visa, last4: "2701", exp_month: 12, exp_year: 2030, saved: false}
+                cvc_required: false
+                next_action:
+                  type: three_ds
+                  three_ds:
+                    url: https://front-3ds.n1co.com/authentication/6f1c2b9e-1d2a-4b8e-9f3c-2a7d5e1b0c44?showBranding=True&lang=es
+                    authentication_id: 6f1c2b9e-1d2a-4b8e-9f3c-2a7d5e1b0c44
+                    expires_at: "2026-10-17T15:16:05Z"
+                last_error: null
+                attempts_remaining: 2
+                refund: null
+                expires_at: "2026-10-17T16:04:05Z"
+        "400":
+          $ref: "#/components/responses/SDKInvalidRequest"
+        "401":
+          $ref: "#/components/responses/InvalidProxyKey"
+        "403":
+          $ref: "#/components/responses/SDKForbidden"
+        "404":
+          $ref: "#/components/responses/PaymentIntentNotFound"
+        "409":
+          $ref: "#/components/responses/PaymentIntentConflict"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/SDKRateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+        "503":
+          $ref: "#/components/responses/ChargeUnavailable"
+    options:
+      operationId: confirmPaymentIntentSDKPreflight
+      security: []
+      summary: CORS preflight for the n1co SDK
+      parameters:
+        - $ref: "#/components/parameters/Origin"
+      responses:
+        "204":
+          $ref: "#/components/responses/Preflight"
+        "403":
+          $ref: "#/components/responses/OriginNotAllowed"
+  /v1/payment_intents/complete:
+    post:
+      operationId: completePaymentIntentSDK
+      security:
+        - proxyKey: []
+      summary: Report a 3D Secure result (n1co SDK only)
+      description: |
+        Called by the n1co SDK through the tokenization proxy (shared rules
+        under `POST /v1/payment_intents/retrieve`) when the 3D Secure page
+        posted its result or the SDK's own 10 minute timeout ran out. The intent must be `requires_action` and
+        `authentication_id` must be the one in `next_action`.
+
+        `succeeded` makes this service send the second charge to n1co with
+        the authentication id; only n1co's answer can make the intent
+        `succeeded`, and it can also decline or ask for a new
+        authentication (`requires_action` again, at most 3 times per
+        attempt). `failed` and `expired` call nothing and return the intent
+        to `requires_payment_method` with `last_error.code`
+        `authentication_failed` or `authentication_expired`. A complete
+        never consumes an attempt. Unknown outcomes behave as for confirm.
+
+        Allow at least 150 seconds.
+      parameters:
+        - $ref: "#/components/parameters/Origin"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PaymentIntentCompleteRequest"
+            example:
+              client_secret: pi_UGF5bWVudEludGVudEV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+              authentication_id: 6f1c2b9e-1d2a-4b8e-9f3c-2a7d5e1b0c44
+              outcome: succeeded
+      responses:
+        "200":
+          description: The client view of the intent after the completion.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PaymentIntentClient"
+        "400":
+          $ref: "#/components/responses/SDKInvalidRequest"
+        "401":
+          $ref: "#/components/responses/InvalidProxyKey"
+        "403":
+          $ref: "#/components/responses/SDKForbidden"
+        "404":
+          $ref: "#/components/responses/PaymentIntentNotFound"
+        "409":
+          $ref: "#/components/responses/PaymentIntentConflict"
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "429":
+          $ref: "#/components/responses/SDKRateLimited"
+        "500":
+          $ref: "#/components/responses/Internal"
+        "503":
+          $ref: "#/components/responses/ChargeUnavailable"
+    options:
+      operationId: completePaymentIntentSDKPreflight
+      security: []
+      summary: CORS preflight for the n1co SDK
+      parameters:
+        - $ref: "#/components/parameters/Origin"
+      responses:
+        "204":
+          $ref: "#/components/responses/Preflight"
+        "403":
+          $ref: "#/components/responses/OriginNotAllowed"
+  /v1/refunds:
+    post:
+      operationId: createRefund
+      summary: Refund a payment intent
+      description: |
+        Reverses a `succeeded` payment intent in full: n1co cancels the
+        intent's order and returns the whole `amount` in its `currency`.
+        There are no partial refunds (`amount` is not a field). `reason`
+        is sent to n1co as the cancellation reason (a fixed English text
+        when absent) and never shown to the buyer; `metadata` stays ours.
+
+        An intent has at most one refund. The refund is recorded first,
+        `pending`, then sent to n1co (up to about 45 seconds; keep client
+        timeouts above 60 seconds). The answer is the refund with the
+        outcome of that send: `succeeded`, `failed` (with `last_error`), or
+        `pending` with `last_error.code` `outcome_unknown` when n1co's
+        answer could not be known. `201` when the refund is created, `200`
+        when an existing refund was sent again.
+
+        Another `POST` for the same intent answers `409 refund_exists`,
+        except when the refund is `failed`, or `pending` with
+        `outcome_unknown` and its last attempt is at least 3 minutes old:
+        then the same refund (same id, reason and metadata; the new body's
+        reason and metadata are ignored) is sent again. A refund is sent
+        at most 3 times, because n1co counts every cancellation call
+        against a limit of its own. After an unknown outcome n1co may
+        already have cancelled the order, so a refusal of the next send
+        leaves the refund `pending` with `outcome_unknown` rather than
+        `failed`; such refunds are reconciled by n1co operators.
+
+        Webhooks (`refund.succeeded`, `refund.failed`) are the source of
+        truth for the result.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RefundCreateRequest"
+            example:
+              payment_intent: pi_UGF5bWVudEludGVudEV4YW1w
+              reason: Duplicate order
+              metadata:
+                ticket: t-8812
+      responses:
+        "200":
+          description: An existing refund was sent again; its outcome.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Refund"
+        "201":
+          description: The refund was created and sent; its outcome.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Refund"
+              example:
+                id: re_UmVmdW5kRXhhbXBsZTAwMDAx
+                object: refund
+                payment_intent: pi_UGF5bWVudEludGVudEV4YW1w
+                amount: 1250
+                currency: USD
+                status: succeeded
+                reason: Duplicate order
+                metadata: {ticket: t-8812}
+                last_error: null
+                attempts: 1
+                created_at: "2026-10-18T10:00:00Z"
+                updated_at: "2026-10-18T10:00:02Z"
+                succeeded_at: "2026-10-18T10:00:02Z"
+                failed_at: null
+        "400":
+          description: |
+            `invalid_request`: the body is not one JSON object, or a field
+            is invalid, with `details.field` and `details.code`:
+            `missing_payment_intent`, `invalid_payment_intent` (not a
+            string), `invalid_reason` (1 to 150 characters after trimming,
+            no control characters), `invalid_metadata` or `unknown_field`
+            (including `amount`: refunds are always for the full amount).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/PaymentIntentNotFound"
+        "409":
+          description: |
+            `payment_intent_not_refundable` with `details.reason`:
+            `not_succeeded` (the intent is not `succeeded`),
+            `order_unknown` (the intent's success was reconciled from n1co
+            reporting the order as already paid, so n1co's order id is not
+            known here; contact n1co to reverse it) or `attempts_exhausted`
+            (the refund was sent 3 times). `refund_exists` with
+            `details.refund`: the intent already has a refund that is not
+            sent again. `refund_in_progress` with `details.refund` and
+            `Retry-After`: the refund is being sent right now.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying (`refund_in_progress` only).
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+              example:
+                error:
+                  code: refund_exists
+                  message: the payment intent already has a refund
+                  details: {refund: re_UmVmdW5kRXhhbXBsZTAwMDAx}
+        "413":
+          $ref: "#/components/responses/TooLarge"
+        "415":
+          $ref: "#/components/responses/UnsupportedMediaType"
+        "500":
+          $ref: "#/components/responses/Internal"
+        "503":
+          description: |
+            `n1co_api_unavailable` (Retry-After 10) or
+            `platform_access_pending`: nothing was sent to n1co. The refund
+            is kept (`pending`, its attempt not counted) and the next `POST`
+            sends it.
+          headers:
+            Retry-After:
+              description: Seconds to wait before retrying.
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+  /v1/refunds/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^re_[A-Za-z0-9_-]{24}$"
+    get:
+      operationId: getRefund
+      summary: Retrieve a refund
+      responses:
+        "200":
+          description: The refund.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Refund"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: "`refund_not_found`: no refund with this id in the authenticated store (malformed ids included)."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /v1/events:
+    get:
+      operationId: listEvents
+      summary: List events
+      description: |
+        The store's events, newest first, each with its delivery state.
+        There is no cursor pagination yet: use `limit` (and `type`) and
+        `GET /v1/events/{id}` for a specific event. Events are kept
+        indefinitely for now.
+      parameters:
+        - name: type
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [card.created, card.updated, payment_intent.succeeded, payment_intent.payment_failed, payment_intent.canceled, refund.succeeded, refund.failed, webhook.test]
+        - name: limit
+          in: query
+          required: false
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: The events.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [data]
+                properties:
+                  data:
+                    type: array
+                    maxItems: 100
+                    items:
+                      $ref: "#/components/schemas/Event"
+        "400":
+          description: |
+            `invalid_request` with `details.field` and `details.code`:
+            `invalid_limit`, `invalid_type`, `unknown_parameter`,
+            `duplicate_parameter` or `invalid_query`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /v1/events/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^evt_[A-Za-z0-9_-]{24}$"
+    get:
+      operationId: getEvent
+      summary: Retrieve an event
+      description: The delivered envelope, as sent, plus its delivery state.
+      responses:
+        "200":
+          description: The event.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Event"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: "`event_not_found`: no event with this id in the authenticated store."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /v1/events/{id}/resend:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: string
+          pattern: "^evt_[A-Za-z0-9_-]{24}$"
+    post:
+      operationId: resendEvent
+      summary: Resend an event
+      description: |
+        Schedules one immediate delivery attempt of the event to the store's
+        current webhook URL and secret, whatever its delivery status
+        (`pending`, `delivered` or `failed`); `webhook.test` events
+        included. The body is byte for byte the one delivered before, with
+        the same `webhook-id`. When that attempt fails the normal retry
+        schedule applies again from its first delay, up to 7 attempts
+        after the resend; `delivery.attempts` keeps counting every attempt.
+        No body is needed. At most one resend per event every 10 seconds.
+      responses:
+        "202":
+          description: The event, its delivery `pending` with `next_attempt_at` now.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Event"
+              example:
+                id: evt_RXZlbnRFeGFtcGxlMDAwMDAx
+                type: card.updated
+                created_at: "2026-10-19T15:06:12Z"
+                data:
+                  object:
+                    id: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                    card_session: cs_VXBkYXRlU2Vzc2lvbkV4YW1w
+                    brand: visa
+                    last4: "4242"
+                    exp_month: 11
+                    exp_year: 2031
+                    issuer: {name: Banco Ejemplo, country: SV}
+                    fingerprint: 5f0c3b1e9a7d4c2b8e6f0a1d3c5b7e9f1a3c5e7b9d1f3a5c7e9b1d3f5a7c9e1b
+                    status: active
+                    created_at: "2026-10-16T15:06:12Z"
+                delivery:
+                  status: pending
+                  attempts: 7
+                  last_attempt_at: "2026-10-20T23:42:15Z"
+                  last_status_code: 503
+                  next_attempt_at: "2026-10-21T09:00:00Z"
+                  delivered_at: null
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          description: "`event_not_found`: no event with this id in the authenticated store."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "409":
+          description: "`delivery_in_progress`: a delivery attempt of the event is running; resend when it ends."
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "429":
+          description: "`rate_limited`: the event was resent less than 10 seconds ago; `Retry-After` says when it can be resent."
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /v1/webhooks/test:
+    post:
+      operationId: testWebhook
+      summary: Send a test event
+      description: |
+        Records a `webhook.test` event (`data.object` is
+        `{"message":"test"}`) and delivers it through the normal pipeline,
+        signed like every event, so you can check your endpoint and your
+        signature verification. No body is needed. At most 10 per minute
+        per store.
+      responses:
+        "202":
+          description: The event, with its pending delivery.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Event"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "429":
+          description: "`rate_limited`, with `Retry-After`."
+          headers:
+            Retry-After:
+              schema:
+                type: integer
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/Internal"
+  /health:
+    get:
+      operationId: health
+      security: []
+      summary: Readiness probe
+      description: Checks Postgres and n1co API reachability (3 s each).
+      responses:
+        "200":
+          description: Healthy
+          content:
+            text/plain:
+              schema:
+                type: string
+                const: Healthy
+        "503":
+          description: Unhealthy
+          content:
+            text/plain:
+              schema:
+                type: string
+                const: Unhealthy
+  /health/live:
+    get:
+      operationId: healthLive
+      security: []
+      summary: Liveness probe
+      responses:
+        "200":
+          description: Healthy
+          content:
+            text/plain:
+              schema:
+                type: string
+                const: Healthy
+x-webhooks:
+  description: |
+    Events are POSTed to the store's `webhook_url` with the Standard Webhooks
+    signature scheme, so any Standard Webhooks library can verify them.
+
+    Headers of every attempt:
+    - `webhook-id`: the event id (`evt_...`), the same at every retry;
+      deduplicate on it.
+    - `webhook-timestamp`: unix seconds of the attempt.
+    - `webhook-signature`: `v1,` and the standard base64 HMAC-SHA256 of
+      `<webhook-id>.<webhook-timestamp>.<raw body>`, keyed with the base64
+      decoding of the part of the webhook secret after `whsec_`. Compare in
+      constant time and reject timestamps more than 5 minutes away.
+    - `content-type: application/json`, `user-agent: n1co-epay-webhooks/1`,
+      `n1co-event-type: <type>`.
+
+    Any 2xx within 10 seconds is success; anything else (3xx included,
+    redirects are never followed) is retried after 1 min, 5 min, 30 min,
+    2 h, 6 h and 24 h, and the delivery is failed after the 7th attempt.
+    Delivery is at least once and not ordered. Each attempt uses the
+    store's current webhook URL and secret. `POST /v1/events/{id}/resend`
+    delivers an event again on demand.
+  card.created:
+    post:
+      summary: A card was captured
+      description: |
+        Sent when a capture succeeds. `data.object` is the card, without the
+        cardholder name or the customer; `card_session` is the session that
+        captured it, which attributes the card to the customer you created
+        the session for.
+      parameters:
+        - {name: webhook-id, in: header, required: true, schema: {type: string}}
+        - {name: webhook-timestamp, in: header, required: true, schema: {type: string}}
+        - {name: webhook-signature, in: header, required: true, schema: {type: string}}
+        - {name: n1co-event-type, in: header, required: true, schema: {type: string, const: card.created}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEnvelope"
+            example:
+              id: evt_RXZlbnRFeGFtcGxlMDAwMDAx
+              type: card.created
+              created_at: "2026-10-16T15:06:12Z"
+              data:
+                object:
+                  id: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                  card_session: cs_U2Vzc2lvbkV4YW1wbGUwMDAx
+                  brand: visa
+                  last4: "4242"
+                  exp_month: 12
+                  exp_year: 2030
+                  issuer: {name: Banco Ejemplo, country: SV}
+                  fingerprint: 5f0c3b1e9a7d4c2b8e6f0a1d3c5b7e9f1a3c5e7b9d1f3a5c7e9b1d3f5a7c9e1b
+                  status: active
+                  created_at: "2026-10-16T15:06:12Z"
+      responses:
+        "2XX":
+          description: Accepted. Any other answer is retried.
+  card.updated:
+    post:
+      summary: A saved card was updated
+      description: |
+        Sent when an update session (`POST /v1/card_sessions` with `card`)
+        updated a saved card. `data.object` has the shape of
+        `card.created`'s, with the new expiry; `card_session` is the update
+        session and `created_at` is still when the card was first saved.
+      parameters:
+        - {name: webhook-id, in: header, required: true, schema: {type: string}}
+        - {name: webhook-timestamp, in: header, required: true, schema: {type: string}}
+        - {name: webhook-signature, in: header, required: true, schema: {type: string}}
+        - {name: n1co-event-type, in: header, required: true, schema: {type: string, const: card.updated}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEnvelope"
+            example:
+              id: evt_Q2FyZFVwZGF0ZWRFeGFtcGxl
+              type: card.updated
+              created_at: "2026-10-19T15:06:12Z"
+              data:
+                object:
+                  id: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                  card_session: cs_VXBkYXRlU2Vzc2lvbkV4YW1w
+                  brand: visa
+                  last4: "4242"
+                  exp_month: 11
+                  exp_year: 2031
+                  issuer: {name: Banco Ejemplo, country: SV}
+                  fingerprint: 5f0c3b1e9a7d4c2b8e6f0a1d3c5b7e9f1a3c5e7b9d1f3a5c7e9b1d3f5a7c9e1b
+                  status: active
+                  created_at: "2026-10-16T15:06:12Z"
+      responses:
+        "2XX":
+          description: Accepted. Any other answer is retried.
+  webhook.test:
+    post:
+      summary: Test event from POST /v1/webhooks/test
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEnvelope"
+            example:
+              id: evt_VGVzdEV2ZW50RXhhbXBsZTAx
+              type: webhook.test
+              created_at: "2026-10-16T15:10:00Z"
+              data:
+                object: {message: test}
+      responses:
+        "2XX":
+          description: Accepted.
+  payment_intent.succeeded:
+    post:
+      summary: A payment intent was paid
+      description: |
+        Sent once when n1co accepts the charge, in the same transaction as
+        the intent's change. `data.object` is the intent without
+        `next_action` and `billing`. Checkout never saves a card, so it
+        never sends `card.created`.
+      parameters:
+        - {name: webhook-id, in: header, required: true, schema: {type: string}}
+        - {name: webhook-timestamp, in: header, required: true, schema: {type: string}}
+        - {name: webhook-signature, in: header, required: true, schema: {type: string}}
+        - {name: n1co-event-type, in: header, required: true, schema: {type: string, const: payment_intent.succeeded}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEnvelope"
+            example:
+              id: evt_UGF5bWVudFN1Y2NlZWRlZDAx
+              type: payment_intent.succeeded
+              created_at: "2026-10-17T15:07:12Z"
+              data:
+                object:
+                  id: pi_UGF5bWVudEludGVudEV4YW1w
+                  object: payment_intent
+                  status: succeeded
+                  amount: 1250
+                  currency: USD
+                  description: Order 8812
+                  reference: order-8812
+                  metadata: {cart: c-1029}
+                  card: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                  payment_method: {brand: visa, last4: "2701", exp_month: 12, exp_year: 2030, saved: true}
+                  cvc_required: false
+                  last_error: null
+                  attempts_remaining: 0
+                  authorization_code: "159992"
+                  order_id: "54214"
+                  cancellation_reason: null
+                  refund: null
+                  created_at: "2026-10-17T15:04:05Z"
+                  updated_at: "2026-10-17T15:07:12Z"
+                  succeeded_at: "2026-10-17T15:07:12Z"
+                  canceled_at: null
+                  expires_at: "2026-10-17T16:04:05Z"
+      responses:
+        "2XX":
+          description: Accepted. Any other answer is retried.
+  payment_intent.payment_failed:
+    post:
+      summary: A payment attempt failed
+      description: |
+        Sent for every failed attempt: a decline, a refused card, a 3D
+        Secure failure or expiry, or a currency or amount mismatch.
+        `data.object.last_error` says why; the intent is
+        `requires_payment_method` again, or `canceled` (followed by
+        `payment_intent.canceled`) when no attempts are left.
+      parameters:
+        - {name: n1co-event-type, in: header, required: true, schema: {type: string, const: payment_intent.payment_failed}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEnvelope"
+      responses:
+        "2XX":
+          description: Accepted. Any other answer is retried.
+  payment_intent.canceled:
+    post:
+      summary: A payment intent was canceled
+      description: |
+        Sent when an intent is canceled: on request, when it expires, when
+        its attempts are exhausted, or after a currency or amount mismatch
+        (`data.object.cancellation_reason`).
+      parameters:
+        - {name: n1co-event-type, in: header, required: true, schema: {type: string, const: payment_intent.canceled}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEnvelope"
+      responses:
+        "2XX":
+          description: Accepted. Any other answer is retried.
+  refund.succeeded:
+    post:
+      summary: A refund succeeded
+      description: |
+        Sent once when n1co cancels the intent's order, in the same
+        transaction as the refund's change. `data.object` is the refund.
+      parameters:
+        - {name: n1co-event-type, in: header, required: true, schema: {type: string, const: refund.succeeded}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEnvelope"
+            example:
+              id: evt_UmVmdW5kU3VjY2VlZGVkMDAx
+              type: refund.succeeded
+              created_at: "2026-10-18T10:00:02Z"
+              data:
+                object:
+                  id: re_UmVmdW5kRXhhbXBsZTAwMDAx
+                  object: refund
+                  payment_intent: pi_UGF5bWVudEludGVudEV4YW1w
+                  amount: 1250
+                  currency: USD
+                  status: succeeded
+                  reason: Duplicate order
+                  metadata: {ticket: t-8812}
+                  last_error: null
+                  attempts: 1
+                  created_at: "2026-10-18T10:00:00Z"
+                  updated_at: "2026-10-18T10:00:02Z"
+                  succeeded_at: "2026-10-18T10:00:02Z"
+                  failed_at: null
+      responses:
+        "2XX":
+          description: Accepted. Any other answer is retried.
+  refund.failed:
+    post:
+      summary: A refund was refused
+      description: |
+        Sent for every send n1co refused (`data.object.last_error` says
+        why). The refund can be sent again with `POST /v1/refunds` while it
+        has sends left. Unknown outcomes send no event.
+      parameters:
+        - {name: n1co-event-type, in: header, required: true, schema: {type: string, const: refund.failed}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/WebhookEnvelope"
+      responses:
+        "2XX":
+          description: Accepted. Any other answer is retried.
+components:
+  securitySchemes:
+    secretKey:
+      type: http
+      scheme: bearer
+      description: |
+        The store's secret key (`sk_` + 32 characters) issued by
+        `POST /v1/setup`. Use it only from servers. A missing, malformed or
+        unknown key answers `401 invalid_api_key` with
+        `WWW-Authenticate: Bearer realm="n1co ePay API"`.
+    proxyKey:
+      type: apiKey
+      in: header
+      name: X-N1co-Proxy-Key
+      description: |
+        Shared secret injected by n1co's tokenization proxy
+        (`CAPTURE_PROXY_KEY`). Only `/v1/capture` and the SDK endpoints
+        under `/v1/payment_intents` use it. A missing,
+        repeated or wrong value answers `401 invalid_proxy_key`.
+  parameters:
+    Origin:
+      name: Origin
+      in: header
+      required: true
+      schema:
+        type: string
+      description: Must be exactly one of `CAPTURE_ALLOWED_ORIGINS`.
+  responses:
+    Unauthorized:
+      description: "`invalid_api_key`: missing, malformed or unknown secret key. The response is the same in every case."
+      headers:
+        WWW-Authenticate:
+          schema:
+            type: string
+            const: Bearer realm="n1co ePay API"
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: invalid_api_key
+              message: "a valid secret key is required: Authorization: Bearer sk_..."
+    InvalidRequest:
+      description: |
+        `invalid_request`: the body is not one JSON object, or a field is
+        invalid. For field errors `details.field` names the first failing
+        field and `details.code` is one of: `unknown_field`,
+        `missing_customer`, `invalid_customer` (not an object), and for
+        `customer.id`, `customer.name`, `customer.email` and
+        `customer.phone`: `missing_id`, `invalid_id`, `missing_name`,
+        `invalid_name`, `missing_email`, `invalid_email`, `missing_phone`,
+        `invalid_phone`; for card sessions also `invalid_page_origins`.
+        Unknown keys inside `customer` are `unknown_field` with
+        `details.field` `customer.<key>`. Customer fields are checked in
+        this order: unknown keys, then `id`, `name`, `email`, `phone`.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+          example:
+            error:
+              code: invalid_request
+              message: customer.phone must be in E.164 format, for example +50370000000
+              details:
+                field: customer.phone
+                code: invalid_phone
+    CardSessionNotFound:
+      description: "`card_session_not_found`: no card session with this id in the authenticated store."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    TooLarge:
+      description: "`request_too_large`: body over 16 KiB."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    UnsupportedMediaType:
+      description: "`unsupported_media_type`: Content-Type is not application/json."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Internal:
+      description: "`internal_error`."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    PaymentIntentNotFound:
+      description: "`payment_intent_not_found`: no intent with this id in the authenticated store, or (SDK endpoints) a malformed, unknown or wrong client secret."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    PaymentIntentConflict:
+      description: |
+        `payment_intent_in_progress`: another confirm or complete holds the
+        intent, or an unknown outcome's 3 minute hold has not ended
+        (`Retry-After`). `payment_intent_unexpected_state`: confirm outside
+        `requires_payment_method`, complete outside `requires_action`
+        (`details.status`); after an unknown outcome only the same kind of
+        call (confirm or complete) is accepted as the retry.
+        `payment_intent_requires_reconciliation`: two charges in a row had
+        an unknown outcome; the intent is reconciled by operators.
+        `card_unavailable`: the attached card is `unavailable` (n1co no
+        longer knows it); confirm with a new card.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying (`payment_intent_in_progress` only).
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    ChargeUnavailable:
+      description: |
+        `n1co_api_unavailable` (Retry-After 10), `platform_access_pending`
+        (no Retry-After) or, on SDK endpoints, `capture_not_tokenized`
+        (card values were not vault aliases; nothing was sent to n1co).
+        The intent is unchanged and the attempt was not consumed.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    SDKInvalidRequest:
+      description: |
+        `invalid_request`: the body is not one JSON object, or a field is
+        invalid. `details.field` is the dotted path (`card.exp_month`,
+        `billing.country`...) and `details.code` one of `duplicate_field`,
+        `unknown_field`, `missing_client_secret`, the card codes of
+        `/v1/capture` (`invalid_card` also for a saved card id,
+        `missing_number` ... `invalid_brand`, `card_expired`),
+        `payment_method_required` (`details.field` `card`: a confirm
+        without `card` on an intent without an attached card),
+        `invalid_cvc` (`card.cvc` is not a string), `cvc_required` (a
+        confirm without `card` on an intent whose attached card needs its
+        security code), `cvc_without_saved_card` (`card` holding only
+        `cvc` on an intent without an attached card), all three with
+        `details.field` `card.cvc`,
+        `invalid_billing`, `missing_country`,
+        `invalid_country`, `invalid_state`, `invalid_postal_code`,
+        `missing_authentication_id`, `invalid_authentication_id` (also when
+        it is not the intent's current authentication), `missing_outcome`,
+        `invalid_outcome`, `invalid_page_origin`. Nothing is counted.
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    InvalidProxyKey:
+      description: "`invalid_proxy_key`: the request did not come through the tokenization proxy."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    SDKForbidden:
+      description: |
+        `origin_not_allowed`: missing or disallowed `Origin`; no CORS headers
+        are sent. `page_origin_not_allowed`: the intent has `page_origins`
+        and `page_origin` is missing or not one of them (nothing is counted
+        but the per-intent rate limit).
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    OriginNotAllowed:
+      description: "`origin_not_allowed`: missing or disallowed `Origin`; no CORS headers are sent."
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    SDKRateLimited:
+      description: |
+        `rate_limited`: more than 60 failed client secret lookups per minute
+        from the source address (shared with `/v1/capture`), or, once the
+        client secret matched, more than 10 requests per minute for the
+        intent or `CHECKOUT_RATE_LIMIT_GLOBAL` (default 300) in total.
+      headers:
+        Retry-After:
+          description: Seconds to wait before retrying.
+          schema:
+            type: integer
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/Error"
+    Preflight:
+      description: Allowed origin.
+      headers:
+        Access-Control-Allow-Origin:
+          schema:
+            type: string
+        Access-Control-Allow-Methods:
+          schema:
+            type: string
+            const: POST, OPTIONS
+        Access-Control-Allow-Headers:
+          schema:
+            type: string
+            const: Content-Type
+        Access-Control-Max-Age:
+          schema:
+            type: string
+            const: "600"
+        Vary:
+          schema:
+            type: string
+            const: Origin
+  schemas:
+    CustomerName:
+      type: string
+      minLength: 2
+      maxLength: 100
+      description: |
+        Trimmed; letters of any script, spaces, apostrophes, hyphens and
+        periods, with at least one letter. Personal data.
+    CustomerEmail:
+      type: string
+      format: email
+      maxLength: 254
+      description: |
+        One `@`; a dot-atom local part of at most 64 ASCII characters; a
+        domain of at least two labels with a non-numeric last label. Stored
+        lowercased. Personal data.
+    CustomerPhone:
+      type: string
+      description: |
+        E.164 (`^\+[1-9]\d{6,14}$`) after removing spaces, hyphens and
+        parentheses; stored normalised. Personal data.
+    Metadata:
+      type: object
+      maxProperties: 20
+      propertyNames:
+        pattern: "^[A-Za-z0-9_.-]{1,40}$"
+      additionalProperties:
+        type: string
+        maxLength: 500
+      description: Partner key-value data returned as given. Do not put sensitive data here.
+    CustomerInput:
+      type: object
+      additionalProperties: false
+      required: [id, name, email, phone]
+      description: |
+        The customer, inline. The first request with an `id` creates the
+        customer in the authenticated store; later ones replace its name,
+        email and phone with the values given (last write wins; an
+        unchanged customer is not an error). Customers are never returned.
+        n1co receives `id` as its customer id, with the name, email and
+        phone.
+      properties:
+        id:
+          type: string
+          pattern: "^[A-Za-z0-9._-]{1,64}$"
+          description: Your own customer id, unique per store and case-sensitive.
+        name:
+          $ref: "#/components/schemas/CustomerName"
+        email:
+          $ref: "#/components/schemas/CustomerEmail"
+        phone:
+          $ref: "#/components/schemas/CustomerPhone"
+    CardSessionCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [customer]
+      properties:
+        customer:
+          $ref: "#/components/schemas/CustomerInput"
+        page_origins:
+          oneOf:
+            - $ref: "#/components/schemas/PageOrigins"
+            - type: "null"
+        card:
+          type: [string, "null"]
+          pattern: "^card_[A-Za-z0-9_-]{24}$"
+          description: |
+            A saved, `active` card of the customer with `customer.id` to
+            update; the session's `mode` is then `update`. Absent or null
+            for a session that saves a new card.
+    CardSessionMode:
+      type: string
+      enum: [capture, update]
+      description: "`capture` saves a new card; `update` updates the saved card in `card`."
+    CardSessionCreated:
+      type: object
+      required: [id, client_secret, mode, card, status, attempts_remaining, page_origins, expires_at]
+      properties:
+        id:
+          type: string
+          pattern: "^cs_[A-Za-z0-9_-]{24}$"
+        client_secret:
+          type: string
+          pattern: "^cs_[A-Za-z0-9_-]{24}_secret_[A-Za-z0-9_-]{32}$"
+          description: For the n1co SDK's card element only. Returned once; only its hash is stored.
+        mode:
+          $ref: "#/components/schemas/CardSessionMode"
+        card:
+          type: [string, "null"]
+          description: The card to update (update sessions); null for capture sessions.
+        status:
+          type: string
+          const: requires_card
+        attempts_remaining:
+          type: integer
+        page_origins:
+          type: [array, "null"]
+          items:
+            type: string
+        expires_at:
+          type: string
+          format: date-time
+    CardSession:
+      type: object
+      required: [id, mode, status, attempts_remaining, card, page_origins, expires_at, created_at]
+      properties:
+        id:
+          type: string
+          pattern: "^cs_[A-Za-z0-9_-]{24}$"
+        mode:
+          $ref: "#/components/schemas/CardSessionMode"
+        status:
+          type: string
+          enum: [requires_card, completed, expired, canceled]
+        attempts_remaining:
+          type: integer
+          description: 0 unless the status is requires_card.
+        card:
+          type: [string, "null"]
+          description: The captured card's id once completed (capture sessions); the card to update, from creation (update sessions).
+        page_origins:
+          type: [array, "null"]
+          items:
+            type: string
+          description: The partner page origins allowed to embed the n1co SDK for this session; null when not bound.
+        expires_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+    CardBrand:
+      type: string
+      enum: [visa, mastercard, amex, unknown]
+    CaptureRequest:
+      type: object
+      additionalProperties: false
+      required: [client_secret, card]
+      properties:
+        client_secret:
+          type: string
+        page_origin:
+          $ref: "#/components/schemas/PageOrigin"
+        card:
+          description: |
+            `CaptureCard` on a capture session, `UpdateCard` on an update
+            session (`number` there answers `number_not_allowed`).
+          oneOf:
+            - $ref: "#/components/schemas/CaptureCard"
+            - $ref: "#/components/schemas/UpdateCard"
+    CaptureCard:
+      type: object
+      description: A card typed in the n1co SDK's card element, number and security code aliased by the tokenization proxy.
+      additionalProperties: false
+      required: [number, cvc, exp_month, exp_year, name, last4, brand]
+      properties:
+        number:
+          type: string
+          description: Vault alias of the card number, set by the tokenization proxy. Must match `CAPTURE_ALIAS_PATTERN`.
+        cvc:
+          $ref: "#/components/schemas/CardCodeAlias"
+        exp_month:
+          $ref: "#/components/schemas/CardExpMonth"
+        exp_year:
+          $ref: "#/components/schemas/CardExpYear"
+        name:
+          $ref: "#/components/schemas/CardholderName"
+        last4:
+          type: string
+          pattern: "^[0-9]{4}$"
+        brand:
+          $ref: "#/components/schemas/CardBrand"
+    UpdateCard:
+      type: object
+      description: |
+        The new details of a saved card, on an update session: the
+        security code (n1co requires it on every update), the expiry and,
+        optionally, the cardholder name (the stored one is kept when
+        absent). Never the number.
+      additionalProperties: false
+      required: [cvc, exp_month, exp_year]
+      properties:
+        cvc:
+          $ref: "#/components/schemas/CardCodeAlias"
+        exp_month:
+          $ref: "#/components/schemas/CardExpMonth"
+        exp_year:
+          $ref: "#/components/schemas/CardExpYear"
+        name:
+          $ref: "#/components/schemas/CardholderName"
+    SavedCardCode:
+      type: object
+      description: The security code of the intent's attached card, alone, on the SDK confirm.
+      additionalProperties: false
+      required: [cvc]
+      properties:
+        cvc:
+          $ref: "#/components/schemas/CardCodeAlias"
+    CardCodeAlias:
+      type: string
+      description: Vault alias of the security code, set by the tokenization proxy. Must match `CAPTURE_ALIAS_PATTERN`.
+    CardExpMonth:
+      type: integer
+      minimum: 1
+      maximum: 12
+    CardExpYear:
+      type: integer
+      minimum: 1000
+      maximum: 9999
+      description: Four digits; with exp_month, not before the current month (UTC); at most 20 years ahead.
+    CardholderName:
+      type: string
+      minLength: 2
+      maxLength: 60
+      description: Cardholder name; letters, spaces, apostrophes, hyphens and periods.
+    CaptureResponse:
+      type: object
+      required: [card, session]
+      properties:
+        card:
+          type: object
+          required: [id, brand, last4, exp_month, exp_year]
+          properties:
+            id:
+              type: string
+              pattern: "^card_[A-Za-z0-9_-]{24}$"
+            brand:
+              $ref: "#/components/schemas/CardBrand"
+            last4:
+              type: string
+            exp_month:
+              type: integer
+            exp_year:
+              type: integer
+        session:
+          type: object
+          required: [id, mode, status]
+          properties:
+            id:
+              type: string
+            mode:
+              $ref: "#/components/schemas/CardSessionMode"
+            status:
+              type: string
+              const: completed
+    SetupRequest:
+      type: object
+      additionalProperties: false
+      required: [client_id, client_secret, webhook_url]
+      properties:
+        client_id:
+          type: string
+          description: Client id of the partner's n1co application.
+          pattern: "^[A-Za-z0-9._-]{1,128}$"
+        client_secret:
+          type: string
+          description: Client secret of the application. Used once, never stored.
+          maxLength: 1024
+          writeOnly: true
+        webhook_url:
+          type: string
+          format: uri
+          maxLength: 2048
+          description: |
+            https URL where events will be delivered. No user information or
+            fragment; port 1-65535 if present; no trailing dot on the
+            host; the host must be a public
+            name (not localhost, *.local, *.internal or a single label) or a
+            public address. Only global unicast addresses outside the IANA
+            special-purpose ranges are accepted (IPv6 only in 2000::/3, no
+            zones; IPv4 embedded in IPv6 is checked as IPv4), both for IP
+            literals and for every address the name resolves to.
+        rotate_secret_key:
+          type: boolean
+          default: false
+        rotate_webhook_secret:
+          type: boolean
+          default: false
+    SetupResponse:
+      type: object
+      required: [store_id, store_name, publishable_key, webhook]
+      properties:
+        store_id:
+          type: string
+          format: uuid
+        store_name:
+          type: string
+        publishable_key:
+          type: string
+          pattern: "^pk_[A-Za-z0-9_-]{32}$"
+        secret_key:
+          type: string
+          pattern: "^sk_[A-Za-z0-9_-]{32}$"
+          description: Present only when issued by this call. Store it securely; it cannot be retrieved again.
+        webhook:
+          type: object
+          required: [url]
+          properties:
+            url:
+              type: string
+              format: uri
+            secret:
+              type: string
+              pattern: "^whsec_[A-Za-z0-9+/]{32}$"
+              description: |
+                Present only when issued by this call. Standard Webhooks
+                format: `whsec_` and the standard base64 of 24 random bytes;
+                the HMAC key is the decoded bytes. Deliveries are signed only
+                with the current secret: switch to a new one as soon as the
+                response that issued it arrives.
+    EventDelivery:
+      type: object
+      required: [status, attempts, last_attempt_at, last_status_code, next_attempt_at, delivered_at]
+      properties:
+        status:
+          type: string
+          enum: [pending, delivered, failed]
+        attempts:
+          type: integer
+          minimum: 0
+          description: Every attempt made, resends included; at most 7 after the creation or the last resend.
+        last_attempt_at:
+          type: [string, "null"]
+          format: date-time
+        last_status_code:
+          type: [integer, "null"]
+          description: HTTP status of the last attempt; null when no response was received.
+        next_attempt_at:
+          type: [string, "null"]
+          format: date-time
+          description: When the next attempt is due; null once delivered or failed.
+        delivered_at:
+          type: [string, "null"]
+          format: date-time
+    Event:
+      type: object
+      required: [id, type, created_at, data, delivery]
+      description: |
+        The envelope delivered to the webhook URL (`id`, `type`,
+        `created_at`, `data`) plus `delivery`, which only the API returns.
+      properties:
+        id:
+          type: string
+          pattern: "^evt_[A-Za-z0-9_-]{24}$"
+          description: Also the `webhook-id` header of every delivery attempt of this event.
+        type:
+          type: string
+          enum: [card.created, card.updated, payment_intent.succeeded, payment_intent.payment_failed, payment_intent.canceled, refund.succeeded, refund.failed, webhook.test]
+        created_at:
+          type: string
+          format: date-time
+        data:
+          type: object
+          required: [object]
+          properties:
+            object:
+              oneOf:
+                - $ref: "#/components/schemas/CardEventObject"
+                - $ref: "#/components/schemas/PaymentIntentEventObject"
+                - $ref: "#/components/schemas/Refund"
+                - type: object
+                  description: "`webhook.test`"
+                  required: [message]
+                  properties:
+                    message:
+                      type: string
+                      const: test
+        delivery:
+          $ref: "#/components/schemas/EventDelivery"
+    CardEventObject:
+      type: object
+      description: |
+        The card as sent in `card.created` and `card.updated`. Webhooks never carry the
+        cardholder name, the customer, or its name, email, phone or
+        addresses.
+      required: [id, card_session, brand, last4, exp_month, exp_year, issuer, fingerprint, status, created_at]
+      properties:
+        id:
+          type: string
+          pattern: "^card_[A-Za-z0-9_-]{24}$"
+        card_session:
+          type: string
+          pattern: "^cs_[A-Za-z0-9_-]{24}$"
+          description: The card session that captured (or, in `card.updated`, updated) the card; it ties the card to the customer the session was created for.
+        brand:
+          $ref: "#/components/schemas/CardBrand"
+        last4:
+          type: string
+          description: As declared by the n1co SDK's card element (n1co returns no masked number). For display only.
+        exp_month:
+          type: integer
+        exp_year:
+          type: integer
+        issuer:
+          type: object
+          required: [name, country]
+          properties:
+            name:
+              type: [string, "null"]
+            country:
+              type: [string, "null"]
+              description: Country code reported by n1co, uppercased.
+        fingerprint:
+          type: string
+          pattern: "^[0-9a-f]{64}$"
+          description: |
+            Keyed hash of the card's vault alias: equal for the same card
+            within n1co's vault, in every store, while the service's primary
+            encryption key is unchanged. Use it to detect a card saved twice.
+        status:
+          type: string
+          enum: [active, unavailable]
+          description: |
+            `unavailable` when n1co no longer knows the card's payment method
+            (a charge answered that the card does not exist): it cannot be
+            charged (`409 card_unavailable`) until the customer saves the
+            same card again, which makes it `active`.
+        created_at:
+          type: string
+          format: date-time
+    WebhookEnvelope:
+      type: object
+      required: [id, type, created_at, data]
+      description: The body of a delivery, byte for byte the same at every attempt.
+      properties:
+        id:
+          type: string
+        type:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        data:
+          type: object
+          required: [object]
+          properties:
+            object:
+              type: object
+    PageOrigins:
+      type: array
+      minItems: 1
+      maxItems: 5
+      uniqueItems: true
+      items:
+        type: string
+        maxLength: 255
+        pattern: "^(https://[a-z0-9.-]+(:[1-9][0-9]{0,4})?|http://(localhost|127\\.0\\.0\\.1)(:[1-9][0-9]{0,4})?)$"
+      description: |
+        Origins of the partner pages allowed to embed the n1co SDK:
+        lowercase `https://host[:port]` without the default port or a path,
+        or `http://localhost` / `http://127.0.0.1` with any port for
+        development. When set, the SDK must report one of them as
+        `page_origin` (defence in depth against a leaked client secret used
+        from another site).
+    PageOrigin:
+      type: [string, "null"]
+      maxLength: 2048
+      description: |
+        Origin of the partner page that embeds the n1co SDK, as the SDK's
+        frame read it from the `event.origin` of its handshake. Required to match
+        when the object has `page_origins`; ignored otherwise.
+    Currency:
+      type: string
+      pattern: "^[A-Z]{3}$"
+      description: ISO 4217 code with two decimal places (for example `USD`).
+    PaymentIntentStatus:
+      type: string
+      enum: [requires_payment_method, requires_action, processing, succeeded, canceled]
+    Billing:
+      type: object
+      additionalProperties: false
+      required: [country]
+      description: |
+        Billing address details n1co needs for cards issued in the United
+        States or Canada (otherwise optional). Personal data; never sent in
+        webhooks.
+      properties:
+        country:
+          type: string
+          pattern: "^[A-Z]{2,3}$"
+          description: ISO 3166-1 alpha-2 or alpha-3 code, uppercase.
+        state:
+          type: [string, "null"]
+          pattern: "^[A-Za-z0-9]{1,3}$"
+        postal_code:
+          type: [string, "null"]
+          pattern: "^[A-Za-z0-9 -]{1,10}$"
+    PaymentIntentCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [amount, currency, customer]
+      properties:
+        amount:
+          type: integer
+          minimum: 1
+          maximum: 1000000000
+          description: Minor units of `currency` (`1250` is 12.50).
+        currency:
+          $ref: "#/components/schemas/Currency"
+        customer:
+          $ref: "#/components/schemas/CustomerInput"
+        description:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 2048
+          description: Sent to n1co as the order description. No control characters.
+        reference:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 150
+          description: Your own reference, sent to n1co as the order name (the intent id when absent). No control characters.
+        metadata:
+          oneOf:
+            - $ref: "#/components/schemas/Metadata"
+            - type: "null"
+          description: Returned as given and never sent to n1co.
+        billing:
+          oneOf:
+            - $ref: "#/components/schemas/Billing"
+            - type: "null"
+        page_origins:
+          oneOf:
+            - $ref: "#/components/schemas/PageOrigins"
+            - type: "null"
+        payment_method:
+          type: [string, "null"]
+          pattern: "^card_[A-Za-z0-9_-]{24}$"
+          description: |
+            A saved, `active` card of the customer with `customer.id` to attach. A
+            confirm without `card` charges it. It stays attached for the
+            life of the intent.
+        cvc_required:
+          type: [boolean, "null"]
+          default: false
+          description: |
+            Requires the attached card's security code (`card.cvc` alone on
+            the SDK confirm) before it is charged. Only with `payment_method`.
+    PaymentIntentConfirmRequest:
+      type: object
+      additionalProperties: false
+      required: [client_secret]
+      properties:
+        client_secret:
+          type: string
+        card:
+          description: |
+            Absent or null charges the attached card. `{"cvc"}` alone is the
+            attached card's security code (required when the intent has
+            `cvc_required`): it is registered at n1co, then the attached
+            card is charged. A full card object is a new card typed in the
+            SDK's card element, charged for this attempt only and never
+            saved. A saved card id is not accepted.
+          oneOf:
+            - $ref: "#/components/schemas/CaptureCard"
+            - $ref: "#/components/schemas/SavedCardCode"
+            - type: "null"
+        billing:
+          oneOf:
+            - $ref: "#/components/schemas/Billing"
+            - type: "null"
+        page_origin:
+          $ref: "#/components/schemas/PageOrigin"
+    PaymentIntentCompleteRequest:
+      type: object
+      additionalProperties: false
+      required: [client_secret, authentication_id, outcome]
+      properties:
+        client_secret:
+          type: string
+        authentication_id:
+          type: string
+          pattern: "^[A-Za-z0-9-]{1,64}$"
+          description: "`next_action.three_ds.authentication_id`, also the `AuthenticationId` of the 3D Secure page's message."
+        outcome:
+          type: string
+          enum: [succeeded, failed, expired]
+          description: |
+            `succeeded` for `Status` `SUCCESS`; `failed` for `FAILED` or
+            `ERROR`; `expired` for `EXPIRED` or when 10 minutes passed
+            without a message.
+        page_origin:
+          $ref: "#/components/schemas/PageOrigin"
+    PaymentMethodSummary:
+      type: object
+      required: [brand, last4, exp_month, exp_year, saved]
+      description: |
+        The card of the current or last attempt, for display; at creation,
+        the attached card.
+      properties:
+        brand:
+          $ref: "#/components/schemas/CardBrand"
+        last4:
+          type: string
+          description: As declared by the n1co SDK's card element, or the saved card's. For display only.
+        exp_month:
+          type: integer
+        exp_year:
+          type: integer
+        saved:
+          type: boolean
+          description: True for a saved card (the attached card, or the customer's saved card charged in place of the same card typed again); false for a new card.
+    NextAction:
+      type: object
+      required: [type, three_ds]
+      properties:
+        type:
+          type: string
+          const: three_ds
+        three_ds:
+          type: object
+          required: [url, authentication_id, expires_at]
+          properties:
+            url:
+              type: string
+              format: uri
+              description: n1co's 3D Secure page; its origin is always in `THREE_DS_ALLOWED_ORIGINS`. Framed by the n1co SDK only.
+            authentication_id:
+              type: string
+            expires_at:
+              type: string
+              format: date-time
+              description: 10 minutes after the authentication was issued.
+    PaymentIntentError:
+      type: object
+      required: [code, decline_code, message]
+      properties:
+        code:
+          type: string
+          enum: [card_declined, card_rejected, card_unavailable, card_update_failed, billing_required, invalid_request, authentication_failed, authentication_expired, provider_error, outcome_unknown, currency_mismatch, amount_mismatch]
+          description: |
+            `card_declined`: n1co declined the charge. `card_rejected`: n1co
+            refused to register the new card. `card_unavailable`: n1co no
+            longer knows the saved card (it is now `unavailable`); confirm
+            with a new card. `card_update_failed`: n1co refused the
+            security code typed for the saved card (nothing was charged);
+            confirm again. `billing_required`: retry with
+            `billing` (state and postal code). `invalid_request`: n1co
+            refused the request. `authentication_failed` /
+            `authentication_expired`: 3D Secure did not succeed.
+            `provider_error`: n1co answered something unusable.
+            `outcome_unknown`: the charge's result could not be known (the
+            intent stays `processing`): no answer, a timeout, a `5xx`, a
+            timing status or an answer that is not n1co's own, or a refusal
+            on the retry that follows an unknown outcome. `currency_mismatch` /
+            `amount_mismatch`: n1co charged another currency or amount; the
+            charge was voided and the intent canceled.
+        decline_code:
+          type: [string, "null"]
+          pattern: "^[A-Z][A-Z0-9_]{0,63}$"
+          description: n1co's decline code for `card_declined`, when it reports one.
+        message:
+          type: string
+          description: Our own English message for the code; never the provider's text.
+    PaymentIntent:
+      type: object
+      required: [id, object, status, amount, currency, description, reference, metadata, billing, page_origins, card, payment_method, cvc_required, next_action, last_error, attempts_remaining, authorization_code, order_id, cancellation_reason, refund, created_at, updated_at, succeeded_at, canceled_at, expires_at]
+      properties:
+        id:
+          type: string
+          pattern: "^pi_[A-Za-z0-9_-]{24}$"
+        object:
+          type: string
+          const: payment_intent
+        status:
+          $ref: "#/components/schemas/PaymentIntentStatus"
+        amount:
+          type: integer
+        currency:
+          $ref: "#/components/schemas/Currency"
+        description:
+          type: [string, "null"]
+        reference:
+          type: [string, "null"]
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        billing:
+          oneOf:
+            - $ref: "#/components/schemas/Billing"
+            - type: "null"
+        page_origins:
+          type: [array, "null"]
+          items:
+            type: string
+          description: The partner page origins allowed to embed the n1co SDK for this intent; null when not bound.
+        card:
+          type: [string, "null"]
+          description: |
+            The saved card of the current or last attempt. At creation, the
+            attached card (`payment_method` on create), or null when none
+            was attached. After an attempt with a new card, null (checkout
+            never saves a card), unless the customer had that card saved:
+            then that saved card's id. A later confirm without a card
+            charges the attached card again and shows it here.
+        payment_method:
+          oneOf:
+            - $ref: "#/components/schemas/PaymentMethodSummary"
+            - type: "null"
+          description: |
+            Display summary of the card in `card` (`saved: true`), or of the
+            new card typed for the current or last attempt (`saved: false`);
+            null when no card was attached and no attempt was made.
+        cvc_required:
+          type: boolean
+          description: Whether a confirm that charges the attached card needs its security code (`card.cvc`).
+        next_action:
+          oneOf:
+            - $ref: "#/components/schemas/NextAction"
+            - type: "null"
+          description: Present only while `requires_action`.
+        last_error:
+          oneOf:
+            - $ref: "#/components/schemas/PaymentIntentError"
+            - type: "null"
+          description: The last failed attempt; cleared when an attempt succeeds.
+        attempts_remaining:
+          type: integer
+          description: Confirms left; 0 once the intent succeeded or was canceled.
+        authorization_code:
+          type: [string, "null"]
+        order_id:
+          type: [string, "null"]
+          description: n1co's order id, set on success. Null when the success was reconciled from n1co reporting the order as already paid.
+        cancellation_reason:
+          type: [string, "null"]
+          enum: [requested, expired, attempts_exhausted, charge_mismatch, null]
+        refund:
+          type: [string, "null"]
+          pattern: "^re_[A-Za-z0-9_-]{24}$"
+          description: The intent's refund, set when one is created (whatever its status). The intent stays `succeeded`.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        succeeded_at:
+          type: [string, "null"]
+          format: date-time
+        canceled_at:
+          type: [string, "null"]
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+          description: After it, an intent still waiting for a payment method (or whose 3D Secure deadline also passed) is canceled.
+    PaymentIntentCreated:
+      allOf:
+        - $ref: "#/components/schemas/PaymentIntent"
+        - type: object
+          required: [client_secret]
+          properties:
+            client_secret:
+              type: string
+              pattern: "^pi_[A-Za-z0-9_-]{24}_secret_[A-Za-z0-9_-]{32}$"
+              description: For the n1co SDK only. Returned once; only its hash is stored.
+    PaymentIntentClient:
+      type: object
+      description: |
+        What the n1co SDK sees. It never carries metadata, reference, billing, card ids, `order_id` or
+        `authorization_code`.
+      required: [id, object, status, amount, currency, description, payment_method, cvc_required, next_action, last_error, attempts_remaining, refund, expires_at]
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          const: payment_intent
+        status:
+          $ref: "#/components/schemas/PaymentIntentStatus"
+        amount:
+          type: integer
+        currency:
+          $ref: "#/components/schemas/Currency"
+        description:
+          type: [string, "null"]
+        payment_method:
+          oneOf:
+            - $ref: "#/components/schemas/PaymentMethodSummary"
+            - type: "null"
+        cvc_required:
+          type: boolean
+          description: The SDK asks the payer for the attached card's security code and sends it as `card.cvc` alone.
+        next_action:
+          oneOf:
+            - $ref: "#/components/schemas/NextAction"
+            - type: "null"
+        last_error:
+          oneOf:
+            - $ref: "#/components/schemas/PaymentIntentError"
+            - type: "null"
+        attempts_remaining:
+          type: integer
+        refund:
+          type: [string, "null"]
+          description: The intent's refund id, or null.
+        expires_at:
+          type: string
+          format: date-time
+    PaymentIntentEventObject:
+      type: object
+      description: |
+        The intent as sent in `payment_intent.*` events: `PaymentIntent`
+        without `next_action`, `billing` and `page_origins`. When a failed
+        attempt also cancels the intent, both events carry the intent as it
+        ended.
+      required: [id, object, status, amount, currency, description, reference, metadata, card, payment_method, cvc_required, last_error, attempts_remaining, authorization_code, order_id, cancellation_reason, refund, created_at, updated_at, succeeded_at, canceled_at, expires_at]
+      properties:
+        id:
+          type: string
+        object:
+          type: string
+          const: payment_intent
+        status:
+          $ref: "#/components/schemas/PaymentIntentStatus"
+        amount:
+          type: integer
+        currency:
+          type: string
+        description:
+          type: [string, "null"]
+        reference:
+          type: [string, "null"]
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        card:
+          type: [string, "null"]
+        payment_method:
+          oneOf:
+            - $ref: "#/components/schemas/PaymentMethodSummary"
+            - type: "null"
+        cvc_required:
+          type: boolean
+        last_error:
+          oneOf:
+            - $ref: "#/components/schemas/PaymentIntentError"
+            - type: "null"
+        attempts_remaining:
+          type: integer
+        authorization_code:
+          type: [string, "null"]
+        order_id:
+          type: [string, "null"]
+        cancellation_reason:
+          type: [string, "null"]
+        refund:
+          type: [string, "null"]
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        succeeded_at:
+          type: [string, "null"]
+          format: date-time
+        canceled_at:
+          type: [string, "null"]
+          format: date-time
+        expires_at:
+          type: string
+          format: date-time
+    RefundCreateRequest:
+      type: object
+      additionalProperties: false
+      required: [payment_intent]
+      properties:
+        payment_intent:
+          type: string
+          description: A `succeeded` payment intent of the store with an n1co order id.
+        reason:
+          type: [string, "null"]
+          minLength: 1
+          maxLength: 150
+          description: Sent to n1co as the cancellation reason, trimmed; no control characters. Never shown to the buyer.
+        metadata:
+          $ref: "#/components/schemas/Metadata"
+    RefundError:
+      type: object
+      required: [code, message]
+      properties:
+        code:
+          type: string
+          enum: [refund_rejected, provider_error, order_not_found, outcome_unknown]
+          description: |
+            `refund_rejected`: n1co refused to cancel the order (for
+            example, after too many cancellation attempts); `message` is
+            n1co's own text. `provider_error`: n1co refused the request
+            for another reason (access, an unexpected refusal).
+            `order_not_found`: n1co does not know the order. The refund is
+            `failed` with these three. `outcome_unknown`: n1co's answer
+            could not be known (no answer, a timeout, a `5xx`, a timing
+            status or an answer that is not n1co's own), or n1co refused a
+            send that followed an unknown outcome; the refund stays
+            `pending` and can be sent again 3 minutes after its last
+            attempt.
+        message:
+          type: string
+          description: n1co's sanitised text (at most 255 characters) for `refund_rejected`; our own English message otherwise.
+    Refund:
+      type: object
+      description: |
+        A full reversal of a payment intent. Never carries n1co's order
+        id, its status or its raw messages beyond `last_error.message`.
+      required: [id, object, payment_intent, amount, currency, status, reason, metadata, last_error, attempts, created_at, updated_at, succeeded_at, failed_at]
+      properties:
+        id:
+          type: string
+          pattern: "^re_[A-Za-z0-9_-]{24}$"
+        object:
+          type: string
+          const: refund
+        payment_intent:
+          type: string
+        amount:
+          type: integer
+          description: The intent's amount; refunds are always for the full amount.
+        currency:
+          $ref: "#/components/schemas/Currency"
+        status:
+          type: string
+          enum: [pending, succeeded, failed]
+          description: |
+            `pending` while it is sent, before its first send (n1co was
+            unavailable), or after an unknown outcome. `succeeded` and
+            `failed` are the result of the last send; a `failed` refund can
+            be sent again.
+        reason:
+          type: [string, "null"]
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+        last_error:
+          oneOf:
+            - $ref: "#/components/schemas/RefundError"
+            - type: "null"
+          description: The last send that did not succeed; cleared when a send starts or succeeds.
+        attempts:
+          type: integer
+          minimum: 0
+          maximum: 3
+          description: Sends made to n1co.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+        succeeded_at:
+          type: [string, "null"]
+          format: date-time
+        failed_at:
+          type: [string, "null"]
+          format: date-time
+          description: Set while the refund is `failed`.
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+            message:
+              type: string
+            details:
+              type: object
+              additionalProperties: true

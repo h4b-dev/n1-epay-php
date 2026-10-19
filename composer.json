@@ -1,0 +1,73 @@
+{
+    "name": "n1co/epay",
+    "description": "Server-side SDK for the n1co ePay API (PHP).",
+    "license": "proprietary",
+    "type": "library",
+    "keywords": [
+        "n1co",
+        "epay",
+        "payments",
+        "sdk"
+    ],
+    "homepage": "https://github.com/h4b-dev/n1-epay-php",
+    "authors": [
+        {
+            "name": "n1co"
+        }
+    ],
+    "support": {
+        "source": "https://github.com/h4b-dev/n1-epay-php"
+    },
+    "require": {
+        "php": "^8.2",
+        "ext-curl": "*",
+        "ext-json": "*"
+    },
+    "require-dev": {
+        "friendsofphp/php-cs-fixer": "^3.95",
+        "phpstan/phpstan": "^2.3",
+        "phpstan/phpstan-phpunit": "^2.1",
+        "phpstan/phpstan-strict-rules": "^2.1",
+        "phpunit/phpunit": "^11.5.57 || ^12.5.40 || ^13.4",
+        "symfony/yaml": "^7.4 || ^8.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "N1co\\EPay\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "N1co\\EPay\\Tests\\": "tests/"
+        }
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true,
+    "config": {
+        "sort-packages": true
+    },
+    "scripts": {
+        "style": "php-cs-fixer check --diff",
+        "style:fix": "php-cs-fixer fix",
+        "analyse": "phpstan analyse --no-progress --memory-limit=1G",
+        "test": "phpunit",
+        "test:unit": "phpunit --testsuite unit",
+        "test:contract": "phpunit --testsuite contract",
+        "check": [
+            "@composer validate --strict",
+            "@style",
+            "@analyse",
+            "@test"
+        ],
+        "sync": "php scripts/sync-spec.php",
+        "smoke": "php scripts/smoke.php"
+    },
+    "scripts-descriptions": {
+        "style": "Checks the code style (PER-CS).",
+        "analyse": "Runs PHPStan at the max level.",
+        "test": "Runs the unit and contract tests.",
+        "check": "Validates composer.json, style, static analysis and tests.",
+        "sync": "Copies the API contract into spec/ (EPAY_API_DIR=<API checkout>).",
+        "smoke": "Manual smoke test against an environment (N1CO_BASE_URL, N1CO_SECRET_KEY)."
+    }
+}

@@ -1,0 +1,10 @@
+/vendor/
+# A library: CI resolves dependencies per PHP version.
+/composer.lock
+/.phpunit.cache/
+/phpunit.xml
+/.php-cs-fixer.cache
+/.phpstan/
+.env
+.env.*
+.DS_Store
