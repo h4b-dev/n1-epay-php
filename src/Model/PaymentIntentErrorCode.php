@@ -24,6 +24,7 @@ final class PaymentIntentErrorCode
     public const OUTCOME_UNKNOWN = 'outcome_unknown';
     public const CURRENCY_MISMATCH = 'currency_mismatch';
     public const AMOUNT_MISMATCH = 'amount_mismatch';
+    public const REFERENCE_ALREADY_PAID = 'reference_already_paid';
 
     /** Every value this SDK version knows. */
     public const ALL = [
@@ -39,6 +40,7 @@ final class PaymentIntentErrorCode
         self::OUTCOME_UNKNOWN,
         self::CURRENCY_MISMATCH,
         self::AMOUNT_MISMATCH,
+        self::REFERENCE_ALREADY_PAID,
     ];
 
     private function __construct() {}

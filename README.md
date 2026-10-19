@@ -33,10 +33,17 @@ $intent = $n1co->paymentIntents->create([
     'reference' => 'order-8812',
 ]);
 
-// Send only $intent->client_secret to the browser. It is shown once.
+// Send only $intent->client_secret to the browser.
 ```
 
 Never send the secret key to a browser.
+
+`reference` is your order id: n1co receives it as the order id of every charge (1 to 150
+characters, no control characters, compared ignoring case). A store has one paid intent per
+reference, and one open. Creating an intent with a paid reference throws `ConflictException` with
+the code `reference_already_paid`, and with a reference that has an open intent,
+`reference_in_use`; both carry `details()['payment_intent']`. A canceled or expired intent frees
+its reference.
 
 ## Environments
 
@@ -72,6 +79,21 @@ for example `pi_…`) before any request; response bodies over 1 MiB are refused
 
 Cancel an unpaid intent with `$n1co->paymentIntents->cancel($id)`.
 
+To resume an open intent from a new page, retrieve it with the secret key and hand its
+`client_secret` to the browser. `retrieve()` returns it (null for intents created before API 0.12.0):
+
+```php
+try {
+    $intent = $n1co->paymentIntents->create($params);
+} catch (ConflictException $e) {
+    if ($e->code() !== 'reference_in_use') {
+        throw $e; // reference_already_paid: the order is paid, do not charge it again
+    }
+    $intent = $n1co->paymentIntents->retrieve($e->details()['payment_intent']);
+}
+// Send only $intent->client_secret to the browser (cancel the intent and create again if it is null).
+```
+
 ## Saved cards
 
 ```php
@@ -87,6 +109,12 @@ $intent = $n1co->paymentIntents->create([
     'cvc_required' => true,       // n1co.js asks the buyer for the security code
 ]);
 ```
+
+`payment_method` also accepts the id of a card you saved with ePay v3 (24 lowercase hexadecimal
+characters). Only its shape is checked; n1co decides when it is charged, and an id it does not
+know fails the attempt with `last_error->code` `card_unavailable`. Such an intent shows that id in
+`card`, and its `payment_method` has `saved === true` with `brand`, `last4`, `exp_month` and
+`exp_year` null. A card session cannot update it (`404 card_not_found`): save the card again.
 
 ### Card update sessions
 
@@ -244,7 +272,7 @@ Branch on `code()` and `details()`, never on the message.
 | `InvalidRequestException`   | 400 (and other 4xx)  | `invalid_request` (see `details()['field']`, `details()['code']`)   |                                             |
 | `AuthenticationException`   | 401, 403             | `invalid_api_key`                                                   |                                             |
 | `NotFoundException`         | 404                  | `*_not_found` (`payment_intent_not_found`, `refund_not_found`, …)   |                                             |
-| `ConflictException`         | 409                  | `card_unavailable`, `refund_exists`, `delivery_in_progress`, …      |                                             |
+| `ConflictException`         | 409                  | `card_unavailable`, `reference_in_use`, `refund_exists`, …           |                                             |
 | `RateLimitException`        | 429                  | `rate_limited` (see `retryAfter()`)                                 |                                             |
 | `ServiceException`          | 5xx, 3xx, unreadable | `n1co_api_unavailable`, `platform_access_pending`, `internal_error` | `unexpected_redirect`, `invalid_response`   |
 | `ConnectionException`       | none                 |                                                                     | `connection_error`, `timeout`               |
@@ -285,7 +313,7 @@ so a status added to the API later does not break your code.
 
 | SDK   | API contract |
 | ----- | ------------ |
-| 0.1.x | 0.10.0       |
+| 0.1.x | 0.12.0       |
 
 `N1co::VERSION` and `N1co::CONTRACT_VERSION` hold them. Until 1.0, a minor version may change
 the API surface along with the contract. From 1.0 the SDK follows semantic versioning.

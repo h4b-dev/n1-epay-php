@@ -8,6 +8,8 @@ use N1co\EPay\Exception\ServiceException;
 use N1co\EPay\Model\Card;
 use N1co\EPay\Model\EventList;
 use N1co\EPay\Model\PaymentIntent;
+use N1co\EPay\Model\PaymentIntentError;
+use N1co\EPay\Model\PaymentIntentErrorCode;
 use N1co\EPay\Model\PaymentIntentStatus;
 use N1co\EPay\Model\Refund;
 use N1co\EPay\Tests\Support\Examples;
@@ -27,6 +29,30 @@ final class ModelsTest extends TestCase
         self::assertSame(['risk_score' => 12], $intent->extra);
         self::assertSame(['network' => 'visa'], $intent->payment_method?->extra);
         self::assertEquals($data, $intent->toArray());
+    }
+
+    public function testReadsAnIntentWithACardSavedWithV3(): void
+    {
+        $example = Spec::examples(Spec::map(Spec::map(Spec::map(Spec::operation('POST', '/v1/payment_intents')['responses'] ?? null)['201'] ?? null)['content'] ?? null)['application/json'] ?? null);
+        $data = Spec::map($example[1] ?? null);
+        $intent = PaymentIntent::fromArray($data);
+        self::assertSame('65f1c0ffee0123456789abcd', $intent->card);
+        $summary = $intent->payment_method;
+        self::assertNotNull($summary);
+        self::assertNull($summary->brand);
+        self::assertNull($summary->last4);
+        self::assertNull($summary->exp_month);
+        self::assertNull($summary->exp_year);
+        self::assertTrue($summary->saved);
+        self::assertEquals($data, $intent->toArray());
+    }
+
+    public function testKnowsReferenceAlreadyPaidAndKeepsUnknownCodes(): void
+    {
+        self::assertContains('reference_already_paid', PaymentIntentErrorCode::ALL);
+        $error = PaymentIntentError::fromArray(['code' => 'reference_already_paid', 'decline_code' => null, 'message' => 'Paid.']);
+        self::assertSame(PaymentIntentErrorCode::REFERENCE_ALREADY_PAID, $error->code);
+        self::assertSame('added_later', PaymentIntentError::fromArray(['code' => 'added_later', 'decline_code' => null, 'message' => 'x'])->code);
     }
 
     public function testReadsNestedObjects(): void

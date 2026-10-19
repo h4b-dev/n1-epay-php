@@ -8,7 +8,9 @@ use N1co\EPay\Internal\Reader;
 use N1co\EPay\ResponseInfo;
 
 /**
- * A payment intent. `client_secret` is set only in the answer of paymentIntents->create(), where it is shown once.
+ * A payment intent. `client_secret` is set in the answers of paymentIntents->create() (always a string) and
+ * paymentIntents->retrieve() (null for intents created before API 0.12.0); it is null in the other answers.
+ * `card` is a `card_` id or a card id saved with ePay v3 (24 lowercase hexadecimal characters), as sent.
  */
 final readonly class PaymentIntent
 {
@@ -94,7 +96,7 @@ final readonly class PaymentIntent
             succeeded_at: $r->nullableString('succeeded_at'),
             canceled_at: $r->nullableString('canceled_at'),
             expires_at: $r->string('expires_at'),
-            client_secret: $r->has('client_secret') ? $r->string('client_secret') : null,
+            client_secret: $r->has('client_secret') ? $r->nullableString('client_secret') : null,
             extra: $r->extra(self::KNOWN),
             lastResponse: $lastResponse,
         );

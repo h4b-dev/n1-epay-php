@@ -140,4 +140,13 @@ final class ServicesTest extends TestCase
         self::assertNull($read->client_secret);
         self::assertArrayNotHasKey('client_secret', $read->toArray());
     }
+
+    public function testRetrieveReadsTheClientSecretOrItsNull(): void
+    {
+        $secret = Examples::response('POST', '/v1/payment_intents')['client_secret'];
+        $transport = new FakeTransport(FakeTransport::json(200, ['client_secret' => $secret] + Examples::intent()), FakeTransport::json(200, ['client_secret' => null] + Examples::intent()));
+        $n1co = TestClient::make($transport);
+        self::assertSame($secret, $n1co->paymentIntents->retrieve('pi_UGF5bWVudEludGVudEV4YW1w')->client_secret);
+        self::assertNull($n1co->paymentIntents->retrieve('pi_UGF5bWVudEludGVudEV4YW1w')->client_secret);
+    }
 }

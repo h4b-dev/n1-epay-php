@@ -7,21 +7,22 @@ namespace N1co\EPay\Model;
 use N1co\EPay\Internal\Reader;
 
 /**
- * The card of a payment intent's current or last attempt, for display.
+ * The card of a payment intent's current or last attempt, for display. For a card saved with
+ * ePay v3 only `saved` (true) is known: `brand`, `last4`, `exp_month` and `exp_year` are null.
  */
 final readonly class PaymentMethodSummary
 {
     private const KNOWN = ['brand', 'last4', 'exp_month', 'exp_year', 'saved'];
 
     /**
-     * @param string $brand One of CardBrand::ALL, or a value added to the API later.
+     * @param ?string $brand One of CardBrand::ALL, or a value added to the API later; null for a card saved with ePay v3.
      * @param array<string, mixed> $extra Fields this SDK version does not know, kept as received.
      */
     public function __construct(
-        public string $brand,
-        public string $last4,
-        public int $exp_month,
-        public int $exp_year,
+        public ?string $brand,
+        public ?string $last4,
+        public ?int $exp_month,
+        public ?int $exp_year,
         public bool $saved,
         public array $extra = [],
     ) {}
@@ -42,10 +43,10 @@ final readonly class PaymentMethodSummary
     public static function read(Reader $r): self
     {
         return new self(
-            brand: $r->string('brand'),
-            last4: $r->string('last4'),
-            exp_month: $r->int('exp_month'),
-            exp_year: $r->int('exp_year'),
+            brand: $r->nullableString('brand'),
+            last4: $r->nullableString('last4'),
+            exp_month: $r->nullableInt('exp_month'),
+            exp_year: $r->nullableInt('exp_year'),
             saved: $r->bool('saved'),
             extra: $r->extra(self::KNOWN),
         );

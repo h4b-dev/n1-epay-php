@@ -139,6 +139,50 @@ if ($intent instanceof PaymentIntent) {
     }
 }
 
+// A card saved with ePay v3 (a bogus id: it is only checked for its shape, nothing is charged) and
+// the order reference rules.
+$v3Id = '7c726c911f6bfa187b5cd79a';
+$orderRef = 'sdk-smoke-v3-' . $suffix;
+$v3Intent = null;
+$step('paymentIntents.create (v3 card id)', static function () use ($n1co, $customer, $v3Id, $orderRef, $status, &$v3Intent): string {
+    $v3Intent = $n1co->paymentIntents->create(['amount' => 100, 'currency' => 'USD', 'customer' => $customer, 'reference' => $orderRef, 'payment_method' => $v3Id]);
+    $summary = $v3Intent->payment_method;
+    if ($v3Intent->card !== $v3Id || $summary === null || $summary->brand !== null || $summary->saved !== true) {
+        throw new \RuntimeException('unexpected v3 card summary');
+    }
+
+    return sprintf('%s %s status=%s brand=null saved=true', $status($v3Intent->lastResponse), $v3Intent->id, $v3Intent->status);
+});
+if ($v3Intent instanceof PaymentIntent) {
+    $v3IntentId = $v3Intent->id;
+    $step('paymentIntents.retrieve (client_secret)', static function () use ($n1co, $status, $v3IntentId): string {
+        $pi = $n1co->paymentIntents->retrieve($v3IntentId);
+        if (!is_string($pi->client_secret)) {
+            throw new \RuntimeException('client_secret is not a string');
+        }
+
+        return sprintf('%s %s status=%s client_secret=string', $status($pi->lastResponse), $pi->id, $pi->status);
+    });
+    $step('paymentIntents.create (same reference)', static function () use ($n1co, $customer, $orderRef, $v3IntentId): string {
+        try {
+            $n1co->paymentIntents->create(['amount' => 100, 'currency' => 'USD', 'customer' => $customer, 'reference' => $orderRef]);
+        } catch (ConflictException $error) {
+            if ($error->code() !== 'reference_in_use' || ($error->details()['payment_intent'] ?? null) !== $v3IntentId) {
+                throw $error;
+            }
+
+            return sprintf('409 %s details.payment_intent=%s (expected)', $error->code(), $v3IntentId);
+        }
+
+        throw new \RuntimeException('expected 409 reference_in_use, got a success');
+    });
+    $step('paymentIntents.cancel (v3 card intent)', static function () use ($n1co, $status, $v3IntentId): string {
+        $pi = $n1co->paymentIntents->cancel($v3IntentId);
+
+        return sprintf('%s %s status=%s', $status($pi->lastResponse), $pi->id, $pi->status);
+    });
+}
+
 $testEvent = null;
 $step('webhooks.test', static function () use ($n1co, $status, &$testEvent): string {
     $testEvent = $n1co->webhooks->test();

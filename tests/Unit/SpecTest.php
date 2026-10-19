@@ -21,6 +21,7 @@ final class SpecTest extends TestCase
         'CardSession' => Model\CardSession::class,
         'CardSessionCreated' => Model\CardSessionCreated::class,
         'PaymentIntent' => Model\PaymentIntent::class,
+        'PaymentIntentRetrieved' => Model\PaymentIntent::class, // PaymentIntent with a nullable client_secret
         'PaymentIntentCreated' => Model\PaymentIntent::class, // PaymentIntent with client_secret
         'PaymentIntentEventObject' => Model\PaymentIntentEventObject::class,
         'PaymentMethodSummary' => Model\PaymentMethodSummary::class,

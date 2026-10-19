@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: n1co ePay API
-  version: "0.10.0"
+  version: "0.12.0"
   description: |
     Partner-facing payments API in front of the n1co Integration API v3.
     Errors are JSON: `{"error":{"code":"...","message":"...","details":{...}}}`;
@@ -252,7 +252,9 @@ paths:
             `card_not_found`: `card` is not a card of the customer with this
             `customer.id` (cards of other customers of the store, of a
             customer id not seen before and of other stores are reported the
-            same way).
+            same way). A card id saved with ePay v3 is reported the same
+            way: such cards are not updated here; save the card again with a
+            capture session instead.
           content:
             application/json:
               schema:
@@ -568,9 +570,27 @@ paths:
         travels inline with your own id, as for card sessions: it is created
         or updated (name, email and phone replaced) by this request. Pass
         `client_secret` to the n1co SDK in the payer's browser; it is
-        returned only here and is valid until the intent succeeds, is
-        canceled or expires (`PAYMENT_INTENT_TTL`, default 1 hour). Never
-        send the secret key to a browser. No call is made to n1co.
+        returned here and by `GET /v1/payment_intents/{id}`, and is valid
+        until the intent succeeds, is canceled or expires
+        (`PAYMENT_INTENT_TTL`, default 1 hour). Never send the secret key to
+        a browser. No call is made to n1co.
+
+        `reference` is your order id: every charge of the intent sends it to
+        n1co as the order id, exactly as an ePay v3 charge's `order.id`, so
+        your searches, reports and v3 webhooks keep working by order id.
+        Without it the intent id is the order id. A store has one paid
+        intent per reference and at most one open: creating an intent with
+        the reference of a `succeeded` intent (refunded or not) answers
+        `409 reference_already_paid`, and with the reference of an intent
+        still open (`requires_payment_method`, `requires_action` or
+        `processing`) `409 reference_in_use`; `details.payment_intent` is
+        that intent. Resume the open one (its client secret is in `GET
+        /v1/payment_intents/{id}`) or cancel it and create again: a
+        `canceled` or expired intent frees its reference. References are
+        trimmed and compared without regard to case, as n1co compares order
+        ids (`Order-1` and `order-1` are one order). n1co keeps its own rule too: an
+        order id already paid in the store is never charged again (see
+        `last_error.code` `reference_already_paid`).
 
         `payment_method` attaches a saved card of the customer with the given
         `customer.id`,
@@ -580,6 +600,21 @@ paths:
         `active` and stays attached for the life of the intent; the intent
         is returned with `card` set to it and `payment_method` showing it
         with `saved: true`.
+
+        `payment_method` may instead be a card id your platform saved with
+        ePay v3 (24 lowercase hexadecimal characters, the `id` v3's
+        `/PaymentMethods` answered and you send as `cardId` to v3's
+        `/Charges`). Only its shape is checked: it has no card object here,
+        nothing is looked up and n1co is not called. A confirm without a
+        new card sends it to n1co as is, with the intent's customer, exactly
+        as a v3 charge does, and n1co decides: an id it does not know (or a
+        card of another store) fails the attempt with `last_error.code`
+        `card_unavailable`. The intent echoes it in `card`, and
+        `payment_method` is `saved: true` with `brand`, `last4` and the
+        expiry null (you received them when you saved the card in v3). Use
+        the same `customer.id` the card was saved with in v3. Such a card
+        cannot be updated with a card session: let the buyer save it again
+        through one, which gives you a `card_` id.
 
         `cvc_required: true` (only with `payment_method`) makes the SDK ask
         the payer for the attached card's security code: a confirm that
@@ -598,20 +633,35 @@ paths:
           application/json:
             schema:
               $ref: "#/components/schemas/PaymentIntentCreateRequest"
-            example:
-              amount: 1250
-              currency: USD
-              customer:
-                id: cust-1001
-                name: Ana López
-                email: ana.lopez@example.com
-                phone: "+503 7000-1234"
-              description: Order 8812
-              reference: order-8812
-              metadata:
-                cart: c-1029
-              payment_method: card_Q2FyZEV4YW1wbGUwMDAwMDAx
-              cvc_required: true
+            examples:
+              savedCard:
+                summary: A saved card of the customer
+                value:
+                  amount: 1250
+                  currency: USD
+                  customer:
+                    id: cust-1001
+                    name: Ana López
+                    email: ana.lopez@example.com
+                    phone: "+503 7000-1234"
+                  description: Order 8812
+                  reference: order-8812
+                  metadata:
+                    cart: c-1029
+                  payment_method: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                  cvc_required: true
+              v3Card:
+                summary: A card saved with ePay v3
+                value:
+                  amount: 1250
+                  currency: USD
+                  customer:
+                    id: cust-1001
+                    name: Ana López
+                    email: ana.lopez@example.com
+                    phone: "+503 7000-1234"
+                  reference: order-8812
+                  payment_method: 65f1c0ffee0123456789abcd
       responses:
         "201":
           description: Intent created, with its client secret.
@@ -619,33 +669,65 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/PaymentIntentCreated"
-              example:
-                id: pi_UGF5bWVudEludGVudEV4YW1w
-                object: payment_intent
-                client_secret: pi_UGF5bWVudEludGVudEV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
-                status: requires_payment_method
-                amount: 1250
-                currency: USD
-                description: Order 8812
-                reference: order-8812
-                metadata: {cart: c-1029}
-                billing: null
-                page_origins: null
-                card: card_Q2FyZEV4YW1wbGUwMDAwMDAx
-                payment_method: {brand: visa, last4: "4242", exp_month: 12, exp_year: 2030, saved: true}
-                cvc_required: true
-                next_action: null
-                last_error: null
-                attempts_remaining: 3
-                authorization_code: null
-                order_id: null
-                cancellation_reason: null
-                refund: null
-                created_at: "2026-10-17T15:04:05Z"
-                updated_at: "2026-10-17T15:04:05Z"
-                succeeded_at: null
-                canceled_at: null
-                expires_at: "2026-10-17T16:04:05Z"
+              examples:
+                savedCard:
+                  summary: A saved card of the customer
+                  value:
+                    id: pi_UGF5bWVudEludGVudEV4YW1w
+                    object: payment_intent
+                    client_secret: pi_UGF5bWVudEludGVudEV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+                    status: requires_payment_method
+                    amount: 1250
+                    currency: USD
+                    description: Order 8812
+                    reference: order-8812
+                    metadata: {cart: c-1029}
+                    billing: null
+                    page_origins: null
+                    card: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                    payment_method: {brand: visa, last4: "4242", exp_month: 12, exp_year: 2030, saved: true}
+                    cvc_required: true
+                    next_action: null
+                    last_error: null
+                    attempts_remaining: 3
+                    authorization_code: null
+                    order_id: null
+                    cancellation_reason: null
+                    refund: null
+                    created_at: "2026-10-17T15:04:05Z"
+                    updated_at: "2026-10-17T15:04:05Z"
+                    succeeded_at: null
+                    canceled_at: null
+                    expires_at: "2026-10-17T16:04:05Z"
+                v3Card:
+                  summary: A card saved with ePay v3
+                  value:
+                    id: pi_UGF5bWVudEludGVudEV4YW1w
+                    object: payment_intent
+                    client_secret: pi_UGF5bWVudEludGVudEV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+                    status: requires_payment_method
+                    amount: 1250
+                    currency: USD
+                    description: null
+                    reference: order-8812
+                    metadata: {}
+                    billing: null
+                    page_origins: null
+                    card: 65f1c0ffee0123456789abcd
+                    payment_method: {brand: null, last4: null, exp_month: null, exp_year: null, saved: true}
+                    cvc_required: false
+                    next_action: null
+                    last_error: null
+                    attempts_remaining: 3
+                    authorization_code: null
+                    order_id: null
+                    cancellation_reason: null
+                    refund: null
+                    created_at: "2026-10-17T15:04:05Z"
+                    updated_at: "2026-10-17T15:04:05Z"
+                    succeeded_at: null
+                    canceled_at: null
+                    expires_at: "2026-10-17T16:04:05Z"
         "400":
           description: |
             `invalid_request`: the body is not one JSON object, or
@@ -662,7 +744,8 @@ paths:
             `invalid_reference`, `invalid_metadata`, `invalid_billing`,
             `missing_country`, `invalid_country`, `invalid_state`,
             `invalid_postal_code`, `invalid_page_origins`,
-            `invalid_payment_method` (not a `card_` id),
+            `invalid_payment_method` (neither a `card_` id nor a card id
+            saved with ePay v3, 24 lowercase hexadecimal characters),
             `invalid_cvc_required` (not a boolean),
             `cvc_required_without_card` (`cvc_required: true` without
             `payment_method`).
@@ -687,10 +770,36 @@ paths:
             `card_unavailable`: the `payment_method` card is `unavailable`
             (n1co no longer knows it); capture the card again or let the
             payer type a new card.
+
+            `reference_already_paid`: an intent of the store with this
+            `reference` succeeded (refunded or not); `details.payment_intent`
+            is its id. The order is paid: do not charge it again.
+
+            `reference_in_use`: an intent of the store with this `reference`
+            is still open (`requires_payment_method`, `requires_action` or
+            `processing`); `details.payment_intent` is its id. Hand its
+            client secret (from `GET /v1/payment_intents/{id}`) to the SDK,
+            or cancel it and create again. Without `details`, another request
+            created an intent with this reference at the same moment.
           content:
             application/json:
               schema:
                 $ref: "#/components/schemas/Error"
+              examples:
+                referenceAlreadyPaid:
+                  summary: The reference is paid
+                  value:
+                    error:
+                      code: reference_already_paid
+                      message: a payment intent with this reference is already paid
+                      details: {payment_intent: pi_UGF5bWVudEludGVudEV4YW1w}
+                referenceInUse:
+                  summary: The reference has an open intent
+                  value:
+                    error:
+                      code: reference_in_use
+                      message: "an open payment intent already has this reference: confirm it, or cancel it and create another"
+                      details: {payment_intent: pi_UGF5bWVudEludGVudEV4YW1w}
         "413":
           $ref: "#/components/responses/TooLarge"
         "415":
@@ -709,18 +818,21 @@ paths:
       operationId: getPaymentIntent
       summary: Retrieve a payment intent
       description: |
-        The intent, without its client secret. Due transitions are applied
-        before it is returned: an expired intent is `canceled` (`expired`),
-        and an intent whose 3D Secure deadline passed is back to
-        `requires_payment_method` with `last_error.code`
-        `authentication_expired`.
+        The intent with its client secret, so your server can hand an open
+        intent (for example one a create refused with `reference_in_use`)
+        to the n1co SDK again. `client_secret` is `null` for intents
+        created before version 0.12.0, whose secret was only kept as a
+        hash. Due transitions are applied before it is returned: an expired
+        intent is `canceled` (`expired`), and an intent whose 3D Secure
+        deadline passed is back to `requires_payment_method` with
+        `last_error.code` `authentication_expired`.
       responses:
         "200":
-          description: The intent.
+          description: The intent, with its client secret.
           content:
             application/json:
               schema:
-                $ref: "#/components/schemas/PaymentIntent"
+                $ref: "#/components/schemas/PaymentIntentRetrieved"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "404":
@@ -856,7 +968,10 @@ paths:
         creation (`payment_method` on create) is charged; when nothing is
         attached the answer is `400
         invalid_request` with `details.code` `payment_method_required`, and
-        when the attached card is `unavailable`, `409 card_unavailable`.
+        when the attached card is `unavailable`, `409 card_unavailable`. An
+        attached card saved with ePay v3 is sent to n1co by its id as is
+        (with `card.cvc` registered first when given); n1co not knowing it
+        fails the attempt with `last_error.code` `card_unavailable`.
         With `card` holding `cvc` alone, the attached card is charged with
         its security code (see below). With a full `card`, a new card typed in the SDK's card element, whose
         `number` and `cvc` the proxy replaced with vault aliases (validated
@@ -864,7 +979,8 @@ paths:
         saved: a card the customer already saved (same expiry, not expired)
         is charged as that saved card; otherwise it is registered at n1co
         as single use, or as reusable when another customer of the store
-        saved it (single use is best effort). `card` must be that object: a
+        saved it or the intent has a card saved with ePay v3 attached
+        (single use is best effort). `card` must be that object: a
         saved card id is refused (`invalid_card`); saved cards are attached
         by your server. `billing`, when given, replaces the intent's
         billing.
@@ -1985,10 +2101,11 @@ components:
             - type: "null"
         card:
           type: [string, "null"]
-          pattern: "^card_[A-Za-z0-9_-]{24}$"
+          pattern: "^(card_[A-Za-z0-9_-]{24}|[0-9a-f]{24})$"
           description: |
             A saved, `active` card of the customer with `customer.id` to
-            update; the session's `mode` is then `update`. Absent or null
+            update (a card id saved with ePay v3 answers `404
+            card_not_found`); the session's `mode` is then `update`. Absent or null
             for a session that saves a new card.
     CardSessionMode:
       type: string
@@ -2430,7 +2547,15 @@ components:
           type: [string, "null"]
           minLength: 1
           maxLength: 150
-          description: Your own reference, sent to n1co as the order name (the intent id when absent). No control characters.
+          pattern: '^[^\x00-\x1F\x7F-\x9F]+$'
+          description: |
+            Your order id, trimmed. Every charge of the intent sends it to
+            n1co as the order id (and the order name); without it the intent
+            id is used. One `succeeded` intent per reference and store, and
+            at most one open (see `409 reference_already_paid` and
+            `reference_in_use`), compared without regard to case as n1co
+            does. 1 to 150 characters after trimming, any
+            letters, digits, spaces and punctuation; no control characters.
         metadata:
           oneOf:
             - $ref: "#/components/schemas/Metadata"
@@ -2446,11 +2571,13 @@ components:
             - type: "null"
         payment_method:
           type: [string, "null"]
-          pattern: "^card_[A-Za-z0-9_-]{24}$"
+          pattern: "^(card_[A-Za-z0-9_-]{24}|[0-9a-f]{24})$"
           description: |
-            A saved, `active` card of the customer with `customer.id` to attach. A
-            confirm without `card` charges it. It stays attached for the
-            life of the intent.
+            A saved, `active` card of the customer with `customer.id` to attach, or
+            a card id saved with ePay v3 (24 lowercase hexadecimal
+            characters; only its shape is checked). A confirm without `card`
+            charges it. It stays attached for the life of the intent.
+          examples: [card_Q2FyZEV4YW1wbGUwMDAwMDAx, 65f1c0ffee0123456789abcd]
         cvc_required:
           type: [boolean, "null"]
           default: false
@@ -2507,20 +2634,26 @@ components:
       required: [brand, last4, exp_month, exp_year, saved]
       description: |
         The card of the current or last attempt, for display; at creation,
-        the attached card.
+        the attached card. For a card saved with ePay v3 only `saved: true`
+        is known: `brand`, `last4`, `exp_month` and `exp_year` are null
+        (n1co's charge answer carries no card details).
       properties:
         brand:
-          $ref: "#/components/schemas/CardBrand"
+          oneOf:
+            - $ref: "#/components/schemas/CardBrand"
+            - type: "null"
         last4:
-          type: string
-          description: As declared by the n1co SDK's card element, or the saved card's. For display only.
+          type: [string, "null"]
+          description: As declared by the n1co SDK's card element, or the saved card's. For display only. Null for a card saved with ePay v3.
         exp_month:
-          type: integer
+          type: [integer, "null"]
+          description: Null for a card saved with ePay v3.
         exp_year:
-          type: integer
+          type: [integer, "null"]
+          description: Null for a card saved with ePay v3.
         saved:
           type: boolean
-          description: True for a saved card (the attached card, or the customer's saved card charged in place of the same card typed again); false for a new card.
+          description: True for a saved card (the attached card, a card saved with ePay v3, or the customer's saved card charged in place of the same card typed again); false for a new card.
     NextAction:
       type: object
       required: [type, three_ds]
@@ -2548,12 +2681,13 @@ components:
       properties:
         code:
           type: string
-          enum: [card_declined, card_rejected, card_unavailable, card_update_failed, billing_required, invalid_request, authentication_failed, authentication_expired, provider_error, outcome_unknown, currency_mismatch, amount_mismatch]
+          enum: [card_declined, card_rejected, card_unavailable, card_update_failed, billing_required, invalid_request, authentication_failed, authentication_expired, provider_error, outcome_unknown, currency_mismatch, amount_mismatch, reference_already_paid]
           description: |
             `card_declined`: n1co declined the charge. `card_rejected`: n1co
             refused to register the new card. `card_unavailable`: n1co no
-            longer knows the saved card (it is now `unavailable`); confirm
-            with a new card. `card_update_failed`: n1co refused the
+            longer knows the saved card (it is now `unavailable`), or does
+            not know the attached card saved with ePay v3 (unknown, deleted
+            or of another store); confirm with a new card. `card_update_failed`: n1co refused the
             security code typed for the saved card (nothing was charged);
             confirm again. `billing_required`: retry with
             `billing` (state and postal code). `invalid_request`: n1co
@@ -2566,6 +2700,11 @@ components:
             on the retry that follows an unknown outcome. `currency_mismatch` /
             `amount_mismatch`: n1co charged another currency or amount; the
             charge was voided and the intent canceled.
+            `reference_already_paid`: n1co answered that the order id (the
+            intent's `reference`) is already paid in the store, by another
+            intent or by an ePay v3 charge; nothing was charged, the attempt
+            does not count and every later confirm meets the same answer:
+            cancel the intent.
         decline_code:
           type: [string, "null"]
           pattern: "^[A-Z][A-Z0-9_]{0,63}$"
@@ -2593,6 +2732,7 @@ components:
           type: [string, "null"]
         reference:
           type: [string, "null"]
+          description: Your order id, n1co's order id for every charge of the intent (the intent id is used when it is null).
         metadata:
           type: object
           additionalProperties:
@@ -2610,7 +2750,8 @@ components:
           type: [string, "null"]
           description: |
             The saved card of the current or last attempt. At creation, the
-            attached card (`payment_method` on create), or null when none
+            attached card (`payment_method` on create: a `card_` id or the
+            card id saved with ePay v3, as sent), or null when none
             was attached. After an attempt with a new card, null (checkout
             never saves a card), unless the customer had that card saved:
             then that saved card's id. A later confirm without a card
@@ -2676,7 +2817,17 @@ components:
             client_secret:
               type: string
               pattern: "^pi_[A-Za-z0-9_-]{24}_secret_[A-Za-z0-9_-]{32}$"
-              description: For the n1co SDK only. Returned once; only its hash is stored.
+              description: For the n1co SDK only. Also returned by `GET /v1/payment_intents/{id}`; stored as its hash and encrypted.
+    PaymentIntentRetrieved:
+      allOf:
+        - $ref: "#/components/schemas/PaymentIntent"
+        - type: object
+          required: [client_secret]
+          properties:
+            client_secret:
+              type: [string, "null"]
+              pattern: "^pi_[A-Za-z0-9_-]{24}_secret_[A-Za-z0-9_-]{32}$"
+              description: For the n1co SDK only; never send it anywhere else. `null` for intents created before version 0.12.0.
     PaymentIntentClient:
       type: object
       description: |

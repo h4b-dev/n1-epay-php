@@ -260,13 +260,20 @@ final class FakeApi
                         $created[$key] = $input[$key];
                     }
                 }
-                if (!isset($input['payment_method'])) {
+                if (\is_string($input['payment_method'] ?? null) && preg_match('/^[0-9a-f]{24}$/', $input['payment_method']) === 1) {
+                    // A card saved with ePay v3: only its id is known (the contract's v3Card example).
+                    $created = array_merge($created, [
+                        'card' => $input['payment_method'],
+                        'payment_method' => ['brand' => null, 'last4' => null, 'exp_month' => null, 'exp_year' => null, 'saved' => true],
+                        'cvc_required' => false,
+                    ]);
+                } elseif (!isset($input['payment_method'])) {
                     $created = array_merge($created, ['card' => null, 'payment_method' => null, 'cvc_required' => false]);
                 }
 
                 return $created;
             case 'getPaymentIntent':
-                return array_merge($intent(), ['id' => $ids['id']]);
+                return array_merge($intent(), ['id' => $ids['id'], 'client_secret' => $example('createPaymentIntent')['client_secret']]);
             case 'cancelPaymentIntent':
                 return array_merge($intent(), [
                     'id' => $ids['id'],

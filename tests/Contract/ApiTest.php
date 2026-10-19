@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace N1co\EPay\Tests\Contract;
 
 use N1co\EPay\Exception\AuthenticationException;
+use N1co\EPay\Exception\ConflictException;
 use N1co\EPay\Exception\InvalidRequestException;
 use N1co\EPay\Exception\NotFoundException;
 use N1co\EPay\N1co;
@@ -105,6 +106,50 @@ final class ApiTest extends TestCase
         self::assertNull($intent->payment_method);
     }
 
+    public function testCreatesAnIntentWithACardSavedWithV3(): void
+    {
+        $v3 = '65f1c0ffee0123456789abcd';
+        $intent = $this->n1co->paymentIntents->create(['amount' => 100, 'currency' => 'USD', 'customer' => self::CUSTOMER, 'reference' => 'order-8812', 'payment_method' => $v3]);
+        self::assertSame($v3, $intent->card);
+        $summary = $intent->payment_method;
+        self::assertNotNull($summary);
+        self::assertNull($summary->brand);
+        self::assertNull($summary->last4);
+        self::assertNull($summary->exp_month);
+        self::assertNull($summary->exp_year);
+        self::assertTrue($summary->saved);
+        self::assertSame([], $this->fake->violations());
+    }
+
+    public function testRetrieveCarriesTheClientSecret(): void
+    {
+        $intent = $this->n1co->paymentIntents->retrieve(self::INTENT);
+        self::assertMatchesRegularExpression('/^pi_[A-Za-z0-9_-]{24}_secret_/', (string) $intent->client_secret);
+        self::assertSame([], $this->fake->violations());
+    }
+
+    #[DataProvider('referenceConflicts')]
+    public function testAReferenceConflictIsAConflictWithTheIntent(string $code): void
+    {
+        $this->fake->force(409, ['error' => ['code' => $code, 'message' => 'fake', 'details' => ['payment_intent' => self::INTENT]]]);
+        try {
+            $this->n1co->paymentIntents->create(['amount' => 100, 'currency' => 'USD', 'customer' => self::CUSTOMER, 'reference' => 'order-8812']);
+            self::fail('Expected a ConflictException.');
+        } catch (ConflictException $e) {
+            self::assertSame(409, $e->status());
+            self::assertSame($code, $e->code());
+            self::assertSame(self::INTENT, $e->details()['payment_intent'] ?? null);
+        }
+    }
+
+    /**
+     * @return array<string, array{string}>
+     */
+    public static function referenceConflicts(): array
+    {
+        return ['already paid' => ['reference_already_paid'], 'in use' => ['reference_in_use']];
+    }
+
     public function testSendsEmptyMetadataAsAJsonObject(): void
     {
         $this->n1co->refunds->create(['payment_intent' => self::INTENT, 'metadata' => []]);
@@ -125,7 +170,6 @@ final class ApiTest extends TestCase
     {
         $intent = $this->n1co->paymentIntents->retrieve(self::INTENT);
         self::assertSame(self::INTENT, $intent->id);
-        self::assertNull($intent->client_secret);
     }
 
     public function testSendsTheDocumentedHeadersAndGetsTheRequestIdBack(): void

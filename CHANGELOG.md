@@ -8,12 +8,22 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- Contract 0.12.0 (`N1co::CONTRACT_VERSION`). `payment_method` also takes a card id saved with
+  ePay v3 (24 lowercase hexadecimal characters); the intent then shows it in `card`.
+- `paymentIntents->create()` answers `ConflictException` `reference_already_paid` or
+  `reference_in_use` (both with `details()['payment_intent']`) when the `reference`, your order
+  id, is paid or has an open intent. `PaymentIntentErrorCode::REFERENCE_ALREADY_PAID`.
+- `paymentIntents->retrieve()` returns `client_secret` (null for intents created before 0.12.0),
+  to resume an open intent from a new page.
 - `webhook_secret` client option (`whsec_` and base64, checked when present, never echoed) and
   `$n1co->webhooks->constructEventFromRequest()`, which reads `php://input` (at most 1 MiB) and
   the headers (`getallheaders()` or `$_SERVER`) itself.
 
 ### Changed
 
+- `PaymentMethodSummary::$brand`, `$last4`, `$exp_month` and `$exp_year` are nullable (null for a
+  card saved with ePay v3).
+- `PaymentIntent::$client_secret` is also set by `retrieve()`.
 - `$n1co->webhooks->constructEvent($payload, $headers, $tolerance)` verifies with the client's
   `webhook_secret` (it took the secret as an argument); without one it throws `LogicException`.
   `Webhook::constructEvent()` still takes the secret.
