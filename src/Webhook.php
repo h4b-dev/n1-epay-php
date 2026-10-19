@@ -19,6 +19,8 @@ final class Webhook
 {
     /** Largest accepted distance between `webhook-timestamp` and now, in seconds. */
     public const DEFAULT_TOLERANCE = 300;
+    /** Largest accepted payload (1 MiB); a larger one is a WebhookSignatureException `invalid_payload`. */
+    public const MAX_PAYLOAD_BYTES = 1024 * 1024;
     private const SECRET_PREFIX = 'whsec_';
 
     private function __construct() {}
@@ -30,7 +32,7 @@ final class Webhook
      * strings or arrays of strings, as PHP frameworks give them) and the store's `whsec_…`
      * secret. Throws WebhookSignatureException when a header is missing, the timestamp is more
      * than $tolerance seconds away from now (either direction), no `v1,` signature matches, or
-     * the body is not an event envelope (`id`, `type`, `data`). A signed event whose object does
+     * the body is over 1 MiB or not an event envelope (`id`, `type`, `data`). A signed event whose object does
      * not fit its model is returned with `data->object` as an array (see EventData).
      *
      * @param array<array-key, mixed> $headers
@@ -51,6 +53,9 @@ final class Webhook
             throw new \InvalidArgumentException('tolerance must be a non-negative number of seconds.');
         }
         $key = self::signingKey($secret);
+        if (\strlen($payload) > self::MAX_PAYLOAD_BYTES) {
+            throw self::payloadTooLarge();
+        }
         $id = self::required($headers, 'webhook-id');
         $timestamp = self::required($headers, 'webhook-timestamp');
         $signatures = self::required($headers, 'webhook-signature');
@@ -112,15 +117,35 @@ final class Webhook
         return 'v1,' . base64_encode(hash_hmac('sha256', $id . '.' . $timestamp . '.' . $payload, self::signingKey($secret), true));
     }
 
+    /**
+     * Whether $secret is `whsec_` followed by standard base64, as the `webhook_secret` option
+     * requires.
+     *
+     * @internal
+     */
+    public static function isPrefixedSecret(#[\SensitiveParameter] string $secret): bool
+    {
+        return str_starts_with($secret, self::SECRET_PREFIX) && self::decodeSecret($secret) !== null;
+    }
+
+    /** @internal */
+    public static function payloadTooLarge(): WebhookSignatureException
+    {
+        return new WebhookSignatureException(\sprintf('The webhook payload is over %d bytes.', self::MAX_PAYLOAD_BYTES), 'invalid_payload');
+    }
+
     private static function signingKey(#[\SensitiveParameter] string $secret): string
+    {
+        return self::decodeSecret($secret)
+            ?? throw new \InvalidArgumentException('The webhook secret (whsec_…) is required and must be base64 after its prefix.');
+    }
+
+    private static function decodeSecret(#[\SensitiveParameter] string $secret): ?string
     {
         $encoded = str_starts_with($secret, self::SECRET_PREFIX) ? substr($secret, \strlen(self::SECRET_PREFIX)) : $secret;
         $key = preg_match('#^[A-Za-z0-9+/]+={0,2}\z#', $encoded) === 1 ? base64_decode($encoded, true) : false;
-        if ($key === false || $key === '') {
-            throw new \InvalidArgumentException('The webhook secret (whsec_…) is required and must be base64 after its prefix.');
-        }
 
-        return $key;
+        return $key === false || $key === '' ? null : $key;
     }
 
     /**

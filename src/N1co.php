@@ -34,7 +34,7 @@ final class N1co
     public const DEFAULT_TIMEOUT = 30;
     public const DEFAULT_MAX_RETRIES = 2;
 
-    private const OPTIONS = ['base_url', 'timeout', 'max_retries', 'app_info', 'transport'];
+    private const OPTIONS = ['base_url', 'timeout', 'max_retries', 'app_info', 'transport', 'webhook_secret'];
 
     public readonly CardSessions $cardSessions;
     public readonly PaymentIntents $paymentIntents;
@@ -50,15 +50,17 @@ final class N1co
      *     max_retries?: int,
      *     app_info?: array{name: string, version?: string, url?: string},
      *     transport?: Transport,
+     *     webhook_secret?: string|null,
      * } $options `base_url` (null or omitted: production; `https` only, plain `http` only for
      *            localhost, 127.0.0.1 and [::1], any port),
      *            `timeout` per attempt in seconds (default 30; refunds->create() at least 90),
      *            `max_retries` of GET requests (default 2, 0 to 10; POST is never retried),
-     *            `app_info` sent in the User-Agent, `transport` (default CurlTransport).
+     *            `app_info` sent in the User-Agent, `transport` (default CurlTransport),
+     *            `webhook_secret` (`whsec_…`) for `webhooks->constructEvent()`.
      *
      * @throws \InvalidArgumentException when the key or an option is not usable
      */
-    public function __construct(#[\SensitiveParameter] string $secretKey, array $options = [])
+    public function __construct(#[\SensitiveParameter] string $secretKey, #[\SensitiveParameter] array $options = [])
     {
         if (preg_match('/^sk_[A-Za-z0-9_-]{32}$/', $secretKey) !== 1) {
             // Never echo the value: it may be a real key with a typo.
@@ -78,6 +80,11 @@ final class N1co
         if (!$transport instanceof Transport) {
             throw new \InvalidArgumentException('transport must implement ' . Transport::class . '.');
         }
+        $webhookSecret = $options['webhook_secret'] ?? null;
+        if ($webhookSecret !== null && (!\is_string($webhookSecret) || !Webhook::isPrefixedSecret($webhookSecret))) {
+            // Never echo the value.
+            throw new \InvalidArgumentException('webhook_secret must be whsec_ followed by base64.');
+        }
 
         $http = new HttpClient(
             $secretKey,
@@ -91,7 +98,7 @@ final class N1co
         $this->paymentIntents = new PaymentIntents($http);
         $this->refunds = new Refunds($http);
         $this->events = new Events($http);
-        $this->webhooks = new Webhooks($http);
+        $this->webhooks = new Webhooks($http, $webhookSecret);
     }
 
     /**

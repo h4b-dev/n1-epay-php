@@ -7,6 +7,6 @@ namespace N1co\EPay\Exception;
 /**
  * Webhook::constructEvent() rejected a delivery. Answer it with a 400 and do not process it.
  * code(): `missing_header`, `invalid_timestamp`, `timestamp_out_of_tolerance`,
- * `invalid_signature` or `invalid_payload`.
+ * `invalid_signature` or `invalid_payload` (also a payload over 1 MiB).
  */
 final class WebhookSignatureException extends N1coException {}

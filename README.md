@@ -50,13 +50,14 @@ The base URL must use `https`. Plain `http` is accepted only for `http://localho
 
 ## Client options
 
-| Option        | Default                     | Notes                                                  |
-| ------------- | --------------------------- | ------------------------------------------------------ |
-| `base_url`    | the production host         | See [Environments](#environments).                     |
-| `timeout`     | `30`                        | Seconds per attempt. `refunds->create()` waits ≥ 90 s. |
-| `max_retries` | `2`                         | GET only, 0 to 10. See [Retries](#retries).            |
-| `app_info`    | none                        | `['name' => …, 'version' => …, 'url' => …]`, sent in the `User-Agent`. |
-| `transport`   | `CurlTransport`             | Any `N1co\EPay\Http\Transport`.                        |
+| Option           | Default             | Notes                                                                                     |
+| ---------------- | ------------------- | ----------------------------------------------------------------------------------------- |
+| `base_url`       | the production host | See [Environments](#environments).                                                        |
+| `timeout`        | `30`                | Seconds per attempt. `refunds->create()` waits ≥ 90 s.                                    |
+| `max_retries`    | `2`                 | GET only, 0 to 10. See [Retries](#retries).                                               |
+| `app_info`       | none                | `['name' => …, 'version' => …, 'url' => …]`, sent in the `User-Agent`.                    |
+| `transport`      | `CurlTransport`     | Any `N1co\EPay\Http\Transport`.                                                           |
+| `webhook_secret` | none                | `whsec_…`, for `webhooks->constructEvent()`. See [Verify deliveries](#verify-deliveries). |
 
 Every API method takes a last `['timeout' => seconds]` argument. Ids are checked (`prefix_…`,
 for example `pi_…`) before any request; response bodies over 1 MiB are refused.
@@ -123,25 +124,21 @@ $n1co->webhooks->test();                     // sends a webhook.test event to yo
 
 ### Verify deliveries
 
-Deliveries are signed with [Standard Webhooks](https://www.standardwebhooks.com/). Verify the
-**raw body**, before any JSON parsing, with your `whsec_…` secret. Read at most 256 KiB: n1co's
-events are far smaller.
+Deliveries are signed with [Standard Webhooks](https://www.standardwebhooks.com/). Give the client
+your `whsec_…` secret once; the SDK reads the raw body and headers and verifies them. Bodies over
+1 MiB are `invalid_payload`.
 
 ```php
 use N1co\EPay\Exception\WebhookSignatureException;
 use N1co\EPay\Model\EventType;
-use N1co\EPay\Model\PaymentIntentEventObject;
-use N1co\EPay\Webhook;
+use N1co\EPay\N1co;
 
-const MAX_WEBHOOK_BODY = 256 * 1024;
+$n1co = new N1co((string) getenv('N1CO_SECRET_KEY'), [
+    'webhook_secret' => (string) getenv('N1CO_WEBHOOK_SECRET'),
+]);
 
-$payload = (string) file_get_contents('php://input', length: MAX_WEBHOOK_BODY + 1); // the raw bytes
-if (\strlen($payload) > MAX_WEBHOOK_BODY) {
-    http_response_code(413);
-    exit;
-}
 try {
-    $event = Webhook::constructEvent($payload, getallheaders(), (string) getenv('N1CO_WEBHOOK_SECRET'));
+    $event = $n1co->webhooks->constructEventFromRequest(); // reads php://input and the headers
 } catch (WebhookSignatureException) {
     http_response_code(400);
     exit;
@@ -152,20 +149,27 @@ if ($event->type === EventType::PAYMENT_INTENT_SUCCEEDED) {
 http_response_code(204);
 ```
 
+With a framework, pass its raw body and headers: `$n1co->webhooks->constructEvent($payload, $headers)`.
+Both take an optional tolerance in seconds (default 300).
+
 `constructEvent` throws `WebhookSignatureException`, with `code()`:
 
 | `code()`                     | Meaning                                                                       |
 | ---------------------------- | ----------------------------------------------------------------------------- |
 | `missing_header`             | `webhook-id`, `webhook-timestamp` or `webhook-signature` is missing.          |
 | `invalid_timestamp`          | `webhook-timestamp` is not a Unix time in seconds.                            |
-| `timestamp_out_of_tolerance` | The timestamp is more than 5 minutes away, either way (4th argument, in s).   |
+| `timestamp_out_of_tolerance` | The timestamp is more than 5 minutes away, either way.                        |
 | `invalid_signature`          | No `v1,` signature matches the body.                                          |
-| `invalid_payload`            | The signed body is not an n1co ePay event.                                    |
+| `invalid_payload`            | The body is over 1 MiB, or the signed body is not an n1co ePay event.         |
 
-An unusable secret (empty, or not base64 after `whsec_`) is a programming error: it throws an
-`InvalidArgumentException`, never `WebhookSignatureException`. **Answer `400` only for
-`WebhookSignatureException`**; any other failure is yours (answer `5xx`, n1co retries). Answer
-`2xx` quickly and deduplicate on `$event->id`: delivery is at least once and not ordered.
+A client without `webhook_secret` throws `LogicException`, and an unusable secret throws
+`InvalidArgumentException`: programming errors, never `WebhookSignatureException`. **Answer
+`400` only for `WebhookSignatureException`**; any other failure is yours (answer `5xx`, n1co
+retries). Answer `2xx` quickly and deduplicate on `$event->id`: delivery is at least once and
+not ordered.
+
+To pass the secret yourself, use the static form:
+`Webhook::constructEvent($payload, $headers, $secret, $tolerance = 300)`. It behaves the same.
 
 `$event->data->object` is a `Card` (`card.created`, `card.updated`), `PaymentIntentEventObject`
 (`payment_intent.*`), `Refund` (`refund.*`) or `WebhookTestObject` (`webhook.test`). For a type
@@ -175,22 +179,23 @@ this version does not know, or an object that does not fit its model, it is the 
 #### Laravel
 
 ```php
+// app/Providers/AppServiceProvider.php, register()
+$this->app->singleton(N1co::class, fn () => new N1co((string) config('services.n1co.secret_key'), [
+    'webhook_secret' => (string) config('services.n1co.webhook_secret'),
+]));
+```
+
+```php
 // routes/api.php (no CSRF there). In routes/web.php, exclude the path from CSRF instead:
 // Laravel 11+: bootstrap/app.php ->withMiddleware(fn (Middleware $m) => $m->validateCsrfTokens(except: ['webhooks/n1co']))
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 use N1co\EPay\Exception\WebhookSignatureException;
-use N1co\EPay\Webhook;
+use N1co\EPay\N1co;
 
-Route::post('/webhooks/n1co', function (Request $request) {
-    $payload = $request->getContent(); // the raw body
-    abort_if(\strlen($payload) > 256 * 1024, 413);
+Route::post('/webhooks/n1co', function (Request $request, N1co $n1co) {
     try {
-        $event = Webhook::constructEvent(
-            $payload,
-            $request->headers->all(),
-            (string) config('services.n1co.webhook_secret'),
-        );
+        $event = $n1co->webhooks->constructEvent($request->getContent(), $request->headers->all());
     } catch (WebhookSignatureException) {
         abort(400);
     }
@@ -201,20 +206,24 @@ Route::post('/webhooks/n1co', function (Request $request) {
 
 #### Symfony
 
+```yaml
+# config/services.yaml
+N1co\EPay\N1co:
+    arguments:
+        $secretKey: '%env(N1CO_SECRET_KEY)%'
+        $options: { webhook_secret: '%env(N1CO_WEBHOOK_SECRET)%' }
+```
+
 ```php
 use N1co\EPay\Exception\WebhookSignatureException;
-use N1co\EPay\Webhook;
+use N1co\EPay\N1co;
 use Symfony\Component\HttpFoundation\Request;
 use Symfony\Component\HttpFoundation\Response;
 
-public function n1co(Request $request): Response
+public function n1co(Request $request, N1co $n1co): Response
 {
-    $payload = $request->getContent(); // the raw body
-    if (\strlen($payload) > 256 * 1024) {
-        return new Response('', Response::HTTP_REQUEST_ENTITY_TOO_LARGE);
-    }
     try {
-        $event = Webhook::constructEvent($payload, $request->headers->all(), $this->webhookSecret);
+        $event = $n1co->webhooks->constructEvent($request->getContent(), $request->headers->all());
     } catch (WebhookSignatureException) {
         return new Response('', Response::HTTP_BAD_REQUEST);
     }
@@ -222,9 +231,6 @@ public function n1co(Request $request): Response
     return new Response('', Response::HTTP_NO_CONTENT);
 }
 ```
-
-PHP has already buffered `getContent()` within the server's limits (`post_max_size`, the web
-server's body limit); keep those near 256 KiB on the webhook route too.
 
 ## Errors
 

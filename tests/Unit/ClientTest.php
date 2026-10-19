@@ -6,6 +6,7 @@ namespace N1co\EPay\Tests\Unit;
 
 use N1co\EPay\N1co;
 use N1co\EPay\Tests\Support\FakeTransport;
+use N1co\EPay\Tests\Support\Spec;
 use N1co\EPay\Tests\Support\TestClient;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -44,6 +45,41 @@ final class ClientTest extends TestCase
             if ($key !== '') {
                 self::assertStringNotContainsString(trim($key), $e->getMessage());
             }
+        }
+    }
+
+    public function testAcceptsAnAbsentNullOrValidWebhookSecret(): void
+    {
+        self::assertSame(['secret' => null], (new N1co(TestClient::KEY))->webhooks->__debugInfo());
+        self::assertSame(['secret' => null], (new N1co(TestClient::KEY, ['webhook_secret' => null]))->webhooks->__debugInfo());
+        self::assertSame(['secret' => 'whsec_[redacted]'], (new N1co(TestClient::KEY, ['webhook_secret' => Spec::WEBHOOK_SECRET]))->webhooks->__debugInfo());
+    }
+
+    /**
+     * @return iterable<string, array{mixed}>
+     */
+    public static function badWebhookSecrets(): iterable
+    {
+        yield 'empty' => [''];
+        yield 'prefix only' => ['whsec_'];
+        yield 'no prefix' => ['MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw'];
+        yield 'other prefix' => ['sk_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw'];
+        yield 'not base64' => ['whsec_MfKQ9r8G***qrTwjUPD8ILPZIo2LaLaSw'];
+        yield 'url-safe base64' => ['whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLa-_'];
+        yield 'whitespace' => ['whsec_MfKQ9r8GKYqrTwjUPD8ILPZIo2LaLaSw '];
+        yield 'not a string' => [12345];
+    }
+
+    #[DataProvider('badWebhookSecrets')]
+    public function testRejectsABadWebhookSecretWithoutEchoingIt(mixed $secret): void
+    {
+        try {
+            new N1co(TestClient::KEY, ['webhook_secret' => $secret]); // @phpstan-ignore argument.type
+            self::fail('Expected an InvalidArgumentException.');
+        } catch (\InvalidArgumentException $e) {
+            self::assertStringContainsString('webhook_secret', $e->getMessage());
+            self::assertStringNotContainsString('MfKQ9r8G', $e->getMessage());
+            self::assertStringNotContainsString('12345', $e->getMessage());
         }
     }
 

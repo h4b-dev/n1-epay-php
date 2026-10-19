@@ -11,7 +11,7 @@ final class TestClient
     public const KEY = Spec::SECRET_KEY;
 
     /**
-     * @param array{base_url?: string|null, timeout?: int|float, max_retries?: int, app_info?: array{name: string, version?: string, url?: string}} $options
+     * @param array{base_url?: string|null, timeout?: int|float, max_retries?: int, app_info?: array{name: string, version?: string, url?: string}, webhook_secret?: string|null} $options
      */
     public static function make(FakeTransport $transport, array $options = []): N1co
     {

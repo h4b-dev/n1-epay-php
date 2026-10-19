@@ -26,11 +26,18 @@ $dump = static function (string $label, \Throwable $e): void {
 
 $intent = Examples::response('POST', '/v1/payment_intents');
 
-// A bad option while constructing the client.
+// A bad option while constructing the client, with a webhook secret among the options.
 try {
-    new N1co(Spec::SECRET_KEY, ['timeout' => 0]);
+    new N1co(Spec::SECRET_KEY, ['timeout' => 0, 'webhook_secret' => Spec::WEBHOOK_SECRET]);
 } catch (\Throwable $e) {
     $dump('constructor', $e);
+}
+
+// A malformed webhook secret (a real one with a typo).
+try {
+    new N1co(Spec::SECRET_KEY, ['webhook_secret' => Spec::WEBHOOK_SECRET . '*']);
+} catch (\Throwable $e) {
+    $dump('webhook_secret', $e);
 }
 
 // An API error and an unreadable answer that carries a client secret.
@@ -68,8 +75,16 @@ foreach ([300, -1] as $tolerance) {
     }
 }
 
-echo "== dumps\n", print_r($n1co, true), print_r($transport->requests, true);
+// A delivery rejected through the client's configured secret.
+$configured = new N1co(Spec::SECRET_KEY, ['transport' => new FakeTransport(), 'webhook_secret' => Spec::WEBHOOK_SECRET]);
+try {
+    $configured->webhooks->constructEvent('{}', ['webhook-id' => 'evt_x', 'webhook-timestamp' => (string) time(), 'webhook-signature' => 'v1,AAAA']);
+} catch (\Throwable $e) {
+    $dump('webhooks->constructEvent', $e);
+}
+
+echo "== dumps\n", print_r($n1co, true), print_r($configured, true), print_r($transport->requests, true);
 ob_start();
-var_dump($n1co);
+var_dump($n1co, $configured);
 echo ob_get_clean();
 echo "== done\n";

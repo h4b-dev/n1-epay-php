@@ -11,9 +11,7 @@ use N1co\EPay\Model\PaymentIntentEventObject;
 use N1co\EPay\Model\Refund;
 use N1co\EPay\Model\WebhookTestObject;
 use N1co\EPay\Tests\Support\Examples;
-use N1co\EPay\Tests\Support\FakeTransport;
 use N1co\EPay\Tests\Support\Spec;
-use N1co\EPay\Tests\Support\TestClient;
 use N1co\EPay\Webhook;
 use PHPUnit\Framework\Attributes\DataProvider;
 use PHPUnit\Framework\TestCase;
@@ -68,14 +66,37 @@ final class WebhookTest extends TestCase
         self::assertSame(self::ID, Webhook::constructEvent(self::BODY, $upper, self::SECRET, now: self::NOW)->id);
     }
 
-    public function testAcceptsTheSecretWithoutItsPrefixAndTheClientHelper(): void
+    public function testAcceptsTheSecretWithoutItsPrefix(): void
     {
         $bare = substr(self::SECRET, \strlen('whsec_'));
         self::assertSame(self::ID, Webhook::constructEvent(self::BODY, self::headers(), $bare, now: self::NOW)->id);
+    }
 
-        $n1co = TestClient::make(new FakeTransport());
-        $headers = self::headers(timestamp: time());
-        self::assertSame(self::ID, $n1co->webhooks->constructEvent(self::BODY, $headers, self::SECRET)->id);
+    public function testRejectsAPayloadOverOneMebibyte(): void
+    {
+        $body = '{"id":"evt_x","type":"webhook.test","created_at":"2026-10-16T15:10:00Z","data":{"object":{"message":"' . str_repeat('a', Webhook::MAX_PAYLOAD_BYTES) . '"}}}';
+        try {
+            Webhook::constructEvent($body, self::headers($body), self::SECRET, now: self::NOW);
+            self::fail('Expected a WebhookSignatureException.');
+        } catch (WebhookSignatureException $e) {
+            self::assertSame('invalid_payload', $e->code());
+        }
+        // Checked before the headers: an oversized body is never hashed.
+        try {
+            Webhook::constructEvent(str_repeat(' ', Webhook::MAX_PAYLOAD_BYTES + 1), [], self::SECRET, now: self::NOW);
+            self::fail('Expected a WebhookSignatureException.');
+        } catch (WebhookSignatureException $e) {
+            self::assertSame('invalid_payload', $e->code());
+        }
+    }
+
+    public function testAcceptsAPayloadOfExactlyOneMebibyte(): void
+    {
+        $head = '{"id":"evt_x","type":"webhook.test","created_at":"2026-10-16T15:10:00Z","data":{"object":{"message":"';
+        $tail = '"}}}';
+        $body = $head . str_repeat('a', Webhook::MAX_PAYLOAD_BYTES - \strlen($head) - \strlen($tail)) . $tail;
+        self::assertSame(Webhook::MAX_PAYLOAD_BYTES, \strlen($body));
+        self::assertSame('evt_x', Webhook::constructEvent($body, self::headers($body), self::SECRET, now: self::NOW)->id);
     }
 
     public function testAcceptsAnyOfSeveralSignatures(): void

@@ -27,7 +27,7 @@ final class SecretsTest extends TestCase
         self::assertSame(0, proc_close($process), $errors);
 
         // The probe ran every scenario, with arguments in the traces.
-        foreach (['constructor', 'events->list', 'paymentIntents->create', 'curl', 'webhook 300', 'webhook -1', 'dumps', 'done'] as $label) {
+        foreach (['constructor', 'webhook_secret', 'events->list', 'paymentIntents->create', 'curl', 'webhook 300', 'webhook -1', 'webhooks->constructEvent', 'dumps', 'done'] as $label) {
             self::assertStringContainsString('== ' . $label, $output);
         }
         self::assertStringContainsString('SensitiveParameterValue', $output);

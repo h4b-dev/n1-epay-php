@@ -6,7 +6,21 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- `webhook_secret` client option (`whsec_` and base64, checked when present, never echoed) and
+  `$n1co->webhooks->constructEventFromRequest()`, which reads `php://input` (at most 1 MiB) and
+  the headers (`getallheaders()` or `$_SERVER`) itself.
+
 ### Changed
+
+- `$n1co->webhooks->constructEvent($payload, $headers, $tolerance)` verifies with the client's
+  `webhook_secret` (it took the secret as an argument); without one it throws `LogicException`.
+  `Webhook::constructEvent()` still takes the secret.
+- Webhook payloads over 1 MiB are rejected with `WebhookSignatureException` `invalid_payload`
+  in every form.
+- README: webhook examples (plain PHP, Laravel, Symfony) use the configured secret; the manual
+  256 KiB body caps are gone.
 
 - A `3xx` answer is a `ServiceException` with the code `unexpected_redirect` (was
   `http_<status>`), as in the Node and .NET SDKs.
@@ -17,8 +31,7 @@ All notable changes to this project are documented here. The format is based on
   (ids were URL-encoded before).
 - `base_url` may be `null`, meaning the production default.
 - README: one errors table shape (class, HTTP status, API codes, SDK-only codes), every webhook
-  verification code, 256 KiB raw-body caps in the webhook examples, and the environments and
-  local `http` hosts stated as in the other SDKs.
+  verification code, and the environments and local `http` hosts stated as in the other SDKs.
 
 ## [0.1.0] - Unreleased
 
