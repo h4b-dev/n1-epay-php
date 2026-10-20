@@ -313,7 +313,7 @@ so a status added to the API later does not break your code.
 
 | SDK   | API contract |
 | ----- | ------------ |
-| 0.1.x | 0.12.0       |
+| 0.1.x | 0.12.1       |
 
 `N1co::VERSION` and `N1co::CONTRACT_VERSION` hold them. Until 1.0, a minor version may change
 the API surface along with the contract. From 1.0 the SDK follows semantic versioning.

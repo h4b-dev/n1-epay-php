@@ -26,7 +26,7 @@ final class N1co
     /** Version of this SDK. */
     public const VERSION = '0.1.0';
     /** Version of the n1co ePay API contract (spec/openapi.yaml) this SDK was built against. */
-    public const CONTRACT_VERSION = '0.12.0';
+    public const CONTRACT_VERSION = '0.12.1';
     /** Production API (the default). */
     public const DEFAULT_BASE_URL = 'https://api-epay.n1co.com';
     /** Development API. */

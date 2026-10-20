@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: n1co ePay API
-  version: "0.12.0"
+  version: "0.12.1"
   description: |
     Partner-facing payments API in front of the n1co Integration API v3.
     Errors are JSON: `{"error":{"code":"...","message":"...","details":{...}}}`;
@@ -978,9 +978,10 @@ paths:
         as in `/v1/capture`), is charged for this attempt only and is never
         saved: a card the customer already saved (same expiry, not expired)
         is charged as that saved card; otherwise it is registered at n1co
-        as single use, or as reusable when another customer of the store
-        saved it or the intent has a card saved with ePay v3 attached
-        (single use is best effort). `card` must be that object: a
+        as reusable (never single use: n1co identifies the buyer by email
+        and a single-use registration would get a card the buyer saved,
+        here or with ePay v3, deleted after the charge) and is not saved
+        here. `card` must be that object: a
         saved card id is refused (`invalid_card`); saved cards are attached
         by your server. `billing`, when given, replaces the intent's
         billing.
