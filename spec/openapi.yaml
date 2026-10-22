@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: n1co ePay API
-  version: "0.12.1"
+  version: "0.13.0"
   description: |
     Partner-facing payments API in front of the n1co Integration API v3.
     Errors are JSON: `{"error":{"code":"...","message":"...","details":{...}}}`;
@@ -135,20 +135,6 @@ paths:
                   message: the application is missing required roles
                   details:
                     missing_roles: [EPay.ReadWrite.OwnedBy]
-        "429":
-          description: |
-            `rate_limited`: too many setup attempts for this client_id
-            (default 5 per minute) or in total (default 60 per minute). No
-            call was made to n1co.
-          headers:
-            Retry-After:
-              description: Seconds to wait before retrying.
-              schema:
-                type: integer
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
         "500":
           description: "`internal_error`."
           content:
@@ -487,12 +473,10 @@ paths:
                 $ref: "#/components/schemas/Error"
         "429":
           description: |
-            `rate_limited`: more than 60 failed session lookups per minute
-            from the source address (the connection, or the first
-            `X-Forwarded-For` entry when `CAPTURE_TRUST_FORWARDED_FOR` is
-            on), or, once the client secret matched, more than 10 captures
-            per minute for the session or `CAPTURE_RATE_LIMIT_GLOBAL`
-            (default 300) in total.
+            `rate_limited`: once the client secret matched, more than 10
+            captures per minute for the session or
+            `CAPTURE_RATE_LIMIT_GLOBAL` (default 300) in total. Failed
+            lookups are not limited by the service (see the README).
           headers:
             Retry-After:
               description: Seconds to wait before retrying.
@@ -623,6 +607,15 @@ paths:
         your server; it is registered for the saved card at n1co right
         before the charge.
 
+        `save_card` (default `true`) is the inverse of an ePay v3
+        partner's `card.singleUse`: a new card typed at checkout is
+        registered at n1co as reusable for the buyer, or with `false` as
+        single use, which n1co deletes after its first successful charge.
+        Nothing is saved here either way. n1co identifies the buyer by
+        email and gives the same card the same payment method id, so
+        `save_card: false` on a card the buyer saved with that email (here
+        or in v3) gets it deleted after the charge, as in v3.
+
         `amount` is in minor units of `currency`. Only currencies with two
         decimal places are supported. Once the store's currency is known
         (from its first successful charge), intents in another currency are
@@ -687,6 +680,7 @@ paths:
                     card: card_Q2FyZEV4YW1wbGUwMDAwMDAx
                     payment_method: {brand: visa, last4: "4242", exp_month: 12, exp_year: 2030, saved: true}
                     cvc_required: true
+                    save_card: true
                     next_action: null
                     last_error: null
                     attempts_remaining: 3
@@ -716,6 +710,7 @@ paths:
                     card: 65f1c0ffee0123456789abcd
                     payment_method: {brand: null, last4: null, exp_month: null, exp_year: null, saved: true}
                     cvc_required: false
+                    save_card: true
                     next_action: null
                     last_error: null
                     attempts_remaining: 3
@@ -748,7 +743,7 @@ paths:
             saved with ePay v3, 24 lowercase hexadecimal characters),
             `invalid_cvc_required` (not a boolean),
             `cvc_required_without_card` (`cvc_required: true` without
-            `payment_method`).
+            `payment_method`), `invalid_save_card` (not a boolean).
           content:
             application/json:
               schema:
@@ -897,9 +892,8 @@ paths:
         payment_intent_not_found`. Every body may carry `page_origin`, the
         origin of the partner page embedding the SDK as its frame learned
         it from its handshake; when the intent has `page_origins` it must be
-        one of them (`403 page_origin_not_allowed`). Failed lookups are limited to 60 per
-        minute per source address (shared with `/v1/capture`); once the
-        client secret matched, 10 requests per minute per intent and
+        one of them (`403 page_origin_not_allowed`). Once the client secret
+        matched, 10 requests per minute per intent and
         `CHECKOUT_RATE_LIMIT_GLOBAL` (default 300) in total. Every response
         carries `Cache-Control: no-store`.
       parameters:
@@ -978,10 +972,10 @@ paths:
         as in `/v1/capture`), is charged for this attempt only and is never
         saved: a card the customer already saved (same expiry, not expired)
         is charged as that saved card; otherwise it is registered at n1co
-        as reusable (never single use: n1co identifies the buyer by email
-        and a single-use registration would get a card the buyer saved,
-        here or with ePay v3, deleted after the charge) and is not saved
-        here. `card` must be that object: a
+        as reusable, or single use when the intent has `save_card: false`
+        (n1co then deletes it after the charge, and with it a card the
+        buyer saved with the same email), and is not saved here. `card`
+        must be that object: a
         saved card id is refused (`invalid_card`); saved cards are attached
         by your server. `billing`, when given, replaces the intent's
         billing.
@@ -1684,8 +1678,9 @@ x-webhooks:
       description: |
         Sent once when n1co accepts the charge, in the same transaction as
         the intent's change. `data.object` is the intent without
-        `next_action` and `billing`. Checkout never saves a card, so it
-        never sends `card.created`.
+        `next_action` and `billing`. Checkout never saves a card here
+        (`save_card` only chooses how n1co keeps it), so it never sends
+        `card.created`.
       parameters:
         - {name: webhook-id, in: header, required: true, schema: {type: string}}
         - {name: webhook-timestamp, in: header, required: true, schema: {type: string}}
@@ -1714,6 +1709,7 @@ x-webhooks:
                   card: card_Q2FyZEV4YW1wbGUwMDAwMDAx
                   payment_method: {brand: visa, last4: "2701", exp_month: 12, exp_year: 2030, saved: true}
                   cvc_required: false
+                  save_card: true
                   last_error: null
                   attempts_remaining: 0
                   authorization_code: "159992"
@@ -2002,10 +1998,9 @@ components:
             $ref: "#/components/schemas/Error"
     SDKRateLimited:
       description: |
-        `rate_limited`: more than 60 failed client secret lookups per minute
-        from the source address (shared with `/v1/capture`), or, once the
-        client secret matched, more than 10 requests per minute for the
-        intent or `CHECKOUT_RATE_LIMIT_GLOBAL` (default 300) in total.
+        `rate_limited`: once the client secret matched, more than 10
+        requests per minute for the intent or `CHECKOUT_RATE_LIMIT_GLOBAL`
+        (default 300) in total.
       headers:
         Retry-After:
           description: Seconds to wait before retrying.
@@ -2585,6 +2580,16 @@ components:
           description: |
             Requires the attached card's security code (`card.cvc` alone on
             the SDK confirm) before it is charged. Only with `payment_method`.
+        save_card:
+          type: [boolean, "null"]
+          default: true
+          description: |
+            How n1co keeps a new card typed at checkout, as an ePay v3
+            partner's `card.singleUse` (inverted): `true` registers it as
+            reusable for the buyer, `false` as single use, deleted by n1co
+            after its first successful charge (a card the buyer saved with
+            the same email is the same payment method and is deleted too).
+            Nothing is saved here either way.
     PaymentIntentConfirmRequest:
       type: object
       additionalProperties: false
@@ -2715,7 +2720,7 @@ components:
           description: Our own English message for the code; never the provider's text.
     PaymentIntent:
       type: object
-      required: [id, object, status, amount, currency, description, reference, metadata, billing, page_origins, card, payment_method, cvc_required, next_action, last_error, attempts_remaining, authorization_code, order_id, cancellation_reason, refund, created_at, updated_at, succeeded_at, canceled_at, expires_at]
+      required: [id, object, status, amount, currency, description, reference, metadata, billing, page_origins, card, payment_method, cvc_required, save_card, next_action, last_error, attempts_remaining, authorization_code, order_id, cancellation_reason, refund, created_at, updated_at, succeeded_at, canceled_at, expires_at]
       properties:
         id:
           type: string
@@ -2768,6 +2773,9 @@ components:
         cvc_required:
           type: boolean
           description: Whether a confirm that charges the attached card needs its security code (`card.cvc`).
+        save_card:
+          type: boolean
+          description: Whether a new card is registered at n1co as reusable (`true`) or single use (`false`), as given on create.
         next_action:
           oneOf:
             - $ref: "#/components/schemas/NextAction"
@@ -2879,7 +2887,7 @@ components:
         without `next_action`, `billing` and `page_origins`. When a failed
         attempt also cancels the intent, both events carry the intent as it
         ended.
-      required: [id, object, status, amount, currency, description, reference, metadata, card, payment_method, cvc_required, last_error, attempts_remaining, authorization_code, order_id, cancellation_reason, refund, created_at, updated_at, succeeded_at, canceled_at, expires_at]
+      required: [id, object, status, amount, currency, description, reference, metadata, card, payment_method, cvc_required, save_card, last_error, attempts_remaining, authorization_code, order_id, cancellation_reason, refund, created_at, updated_at, succeeded_at, canceled_at, expires_at]
       properties:
         id:
           type: string
@@ -2907,6 +2915,8 @@ components:
             - $ref: "#/components/schemas/PaymentMethodSummary"
             - type: "null"
         cvc_required:
+          type: boolean
+        save_card:
           type: boolean
         last_error:
           oneOf:

@@ -37,8 +37,8 @@ final class ServicesTest extends TestCase
             'GET', '/v1/card_sessions/cs_U2Vzc2lvbkV4YW1wbGUwMDAx', null, Examples::session(), CardSession::class,
         ];
         yield 'paymentIntents.create' => [
-            static fn(N1co $n): object => $n->paymentIntents->create(['amount' => 1250, 'currency' => 'USD', 'customer' => $customer, 'metadata' => ['cart' => 'c-1029'], 'payment_method' => 'card_Q2FyZEV4YW1wbGUwMDAwMDAx', 'cvc_required' => true]),
-            'POST', '/v1/payment_intents', ['amount' => 1250, 'currency' => 'USD', 'customer' => $customer, 'metadata' => ['cart' => 'c-1029'], 'payment_method' => 'card_Q2FyZEV4YW1wbGUwMDAwMDAx', 'cvc_required' => true],
+            static fn(N1co $n): object => $n->paymentIntents->create(['amount' => 1250, 'currency' => 'USD', 'customer' => $customer, 'metadata' => ['cart' => 'c-1029'], 'payment_method' => 'card_Q2FyZEV4YW1wbGUwMDAwMDAx', 'cvc_required' => true, 'save_card' => false]),
+            'POST', '/v1/payment_intents', ['amount' => 1250, 'currency' => 'USD', 'customer' => $customer, 'metadata' => ['cart' => 'c-1029'], 'payment_method' => 'card_Q2FyZEV4YW1wbGUwMDAwMDAx', 'cvc_required' => true, 'save_card' => false],
             Examples::response('POST', '/v1/payment_intents'), PaymentIntent::class,
         ];
         yield 'paymentIntents.retrieve' => [

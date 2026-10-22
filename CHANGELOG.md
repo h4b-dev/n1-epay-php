@@ -8,6 +8,10 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
+- Contract 0.13.0 (`N1co::CONTRACT_VERSION`). `paymentIntents->create()` accepts `save_card`
+  (bool, default `true`; `false` registers a new card as single use at n1co and ePay saves
+  nothing; a non-boolean answers `InvalidRequestException` `invalid_save_card`).
+  `PaymentIntent` and `PaymentIntentEventObject` carry `save_card`.
 - Contract 0.12.0 (`N1co::CONTRACT_VERSION`). `payment_method` also takes a card id saved with
   ePay v3 (24 lowercase hexadecimal characters); the intent then shows it in `card`.
 - `paymentIntents->create()` answers `ConflictException` `reference_already_paid` or

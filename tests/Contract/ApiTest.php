@@ -55,6 +55,7 @@ final class ApiTest extends TestCase
                 'page_origins' => ['https://shop.example.com'],
                 'payment_method' => self::CARD,
                 'cvc_required' => true,
+                'save_card' => false,
             ]),
             'getPaymentIntent' => static fn(N1co $n): object => $n->paymentIntents->retrieve(self::INTENT),
             'cancelPaymentIntent' => static fn(N1co $n): object => $n->paymentIntents->cancel(self::INTENT),

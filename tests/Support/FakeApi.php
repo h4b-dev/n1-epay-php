@@ -255,7 +255,7 @@ final class FakeApi
                 return array_merge($session, ['id' => $ids['id'], 'created_at' => '2026-10-16T15:04:05Z']);
             case 'createPaymentIntent':
                 $created = $op['example'];
-                foreach (['amount', 'currency', 'description', 'reference', 'metadata', 'page_origins'] as $key) {
+                foreach (['amount', 'currency', 'description', 'reference', 'metadata', 'page_origins', 'save_card'] as $key) {
                     if (\array_key_exists($key, $input)) {
                         $created[$key] = $input[$key];
                     }

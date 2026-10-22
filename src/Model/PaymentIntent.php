@@ -14,7 +14,7 @@ use N1co\EPay\ResponseInfo;
  */
 final readonly class PaymentIntent
 {
-    private const KNOWN = ['id', 'object', 'status', 'amount', 'currency', 'description', 'reference', 'metadata', 'billing', 'page_origins', 'card', 'payment_method', 'cvc_required', 'next_action', 'last_error', 'attempts_remaining', 'authorization_code', 'order_id', 'cancellation_reason', 'refund', 'created_at', 'updated_at', 'succeeded_at', 'canceled_at', 'expires_at', 'client_secret'];
+    private const KNOWN = ['id', 'object', 'status', 'amount', 'currency', 'description', 'reference', 'metadata', 'billing', 'page_origins', 'card', 'payment_method', 'cvc_required', 'save_card', 'next_action', 'last_error', 'attempts_remaining', 'authorization_code', 'order_id', 'cancellation_reason', 'refund', 'created_at', 'updated_at', 'succeeded_at', 'canceled_at', 'expires_at', 'client_secret'];
 
     /**
      * @param string $status One of PaymentIntentStatus::ALL, or a value added to the API later.
@@ -38,6 +38,7 @@ final readonly class PaymentIntent
         public ?string $card,
         public ?PaymentMethodSummary $payment_method,
         public bool $cvc_required,
+        public bool $save_card,
         public ?NextAction $next_action,
         public ?PaymentIntentError $last_error,
         public int $attempts_remaining,
@@ -84,6 +85,7 @@ final readonly class PaymentIntent
             card: $r->nullableString('card'),
             payment_method: ($o = $r->nullableObject('payment_method')) === null ? null : PaymentMethodSummary::read($o),
             cvc_required: $r->bool('cvc_required'),
+            save_card: $r->bool('save_card'),
             next_action: ($o = $r->nullableObject('next_action')) === null ? null : NextAction::read($o),
             last_error: ($o = $r->nullableObject('last_error')) === null ? null : PaymentIntentError::read($o),
             attempts_remaining: $r->int('attempts_remaining'),
@@ -123,6 +125,7 @@ final readonly class PaymentIntent
             'card' => $this->card,
             'payment_method' => $this->payment_method?->toArray(),
             'cvc_required' => $this->cvc_required,
+            'save_card' => $this->save_card,
             'next_action' => $this->next_action?->toArray(),
             'last_error' => $this->last_error?->toArray(),
             'attempts_remaining' => $this->attempts_remaining,

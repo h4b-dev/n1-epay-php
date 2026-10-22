@@ -11,7 +11,7 @@ use N1co\EPay\Internal\Reader;
  */
 final readonly class PaymentIntentEventObject
 {
-    private const KNOWN = ['id', 'object', 'status', 'amount', 'currency', 'description', 'reference', 'metadata', 'card', 'payment_method', 'cvc_required', 'last_error', 'attempts_remaining', 'authorization_code', 'order_id', 'cancellation_reason', 'refund', 'created_at', 'updated_at', 'succeeded_at', 'canceled_at', 'expires_at'];
+    private const KNOWN = ['id', 'object', 'status', 'amount', 'currency', 'description', 'reference', 'metadata', 'card', 'payment_method', 'cvc_required', 'save_card', 'last_error', 'attempts_remaining', 'authorization_code', 'order_id', 'cancellation_reason', 'refund', 'created_at', 'updated_at', 'succeeded_at', 'canceled_at', 'expires_at'];
 
     /**
      * @param string $status One of PaymentIntentStatus::ALL, or a value added to the API later.
@@ -31,6 +31,7 @@ final readonly class PaymentIntentEventObject
         public ?string $card,
         public ?PaymentMethodSummary $payment_method,
         public bool $cvc_required,
+        public bool $save_card,
         public ?PaymentIntentError $last_error,
         public int $attempts_remaining,
         public ?string $authorization_code,
@@ -72,6 +73,7 @@ final readonly class PaymentIntentEventObject
             card: $r->nullableString('card'),
             payment_method: ($o = $r->nullableObject('payment_method')) === null ? null : PaymentMethodSummary::read($o),
             cvc_required: $r->bool('cvc_required'),
+            save_card: $r->bool('save_card'),
             last_error: ($o = $r->nullableObject('last_error')) === null ? null : PaymentIntentError::read($o),
             attempts_remaining: $r->int('attempts_remaining'),
             authorization_code: $r->nullableString('authorization_code'),
@@ -106,6 +108,7 @@ final readonly class PaymentIntentEventObject
             'card' => $this->card,
             'payment_method' => $this->payment_method?->toArray(),
             'cvc_required' => $this->cvc_required,
+            'save_card' => $this->save_card,
             'last_error' => $this->last_error?->toArray(),
             'attempts_remaining' => $this->attempts_remaining,
             'authorization_code' => $this->authorization_code,

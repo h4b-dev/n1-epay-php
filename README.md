@@ -116,6 +116,12 @@ know fails the attempt with `last_error->code` `card_unavailable`. Such an inten
 `card`, and its `payment_method` has `saved === true` with `brand`, `last4`, `exp_month` and
 `exp_year` null. A card session cannot update it (`404 card_not_found`): save the card again.
 
+### Single-use card
+
+`save_card` on `paymentIntents->create()` defaults to `true`. With `'save_card' => false`, a new
+card typed in the card element is single use at n1co and ePay saves nothing. The intent and its
+`payment_intent.*` events carry `save_card`.
+
 ### Card update sessions
 
 A reissued card (same number, new expiry) is updated, not saved again:
@@ -313,7 +319,7 @@ so a status added to the API later does not break your code.
 
 | SDK   | API contract |
 | ----- | ------------ |
-| 0.1.x | 0.12.1       |
+| 0.1.x | 0.13.0       |
 
 `N1co::VERSION` and `N1co::CONTRACT_VERSION` hold them. Until 1.0, a minor version may change
 the API surface along with the contract. From 1.0 the SDK follows semantic versioning.
