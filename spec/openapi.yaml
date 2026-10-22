@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: n1co ePay API
-  version: "0.13.0"
+  version: "0.14.0"
   description: |
     Partner-facing payments API in front of the n1co Integration API v3.
     Errors are JSON: `{"error":{"code":"...","message":"...","details":{...}}}`;
@@ -172,7 +172,8 @@ paths:
 
         Without `card` the session saves a new card (`mode` `capture`).
         With `card`, a saved, `active` card of the customer with this
-        `customer.id`, the session updates that card (`mode` `update`):
+        `customer.id` (its id is n1co's payment method id, see `Card`), the
+        session updates that card (`mode` `update`):
         the payer types the new expiry and the security code (and,
         optionally, the cardholder name) in n1co's frames, never the
         number, and the card keeps its id and fingerprint. Use it for a
@@ -200,7 +201,7 @@ paths:
                     name: Ana López
                     email: ana.lopez@example.com
                     phone: "+503 7000-1234"
-                  card: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                  card: 65f1c0ffee0123456789abcd
       responses:
         "201":
           description: Session created.
@@ -224,7 +225,7 @@ paths:
                     id: cs_VXBkYXRlU2Vzc2lvbkV4YW1w
                     client_secret: cs_VXBkYXRlU2Vzc2lvbkV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
                     mode: update
-                    card: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                    card: 65f1c0ffee0123456789abcd
                     status: requires_card
                     attempts_remaining: 5
                     page_origins: null
@@ -235,12 +236,13 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           description: |
-            `card_not_found`: `card` is not a card of the customer with this
-            `customer.id` (cards of other customers of the store, of a
-            customer id not seen before and of other stores are reported the
-            same way). A card id saved with ePay v3 is reported the same
-            way: such cards are not updated here; save the card again with a
-            capture session instead.
+            `card_not_found`: the customer with this `customer.id` has no
+            card with the id `card` here (cards of other customers of the
+            store, of a customer id not seen before and of other stores are
+            reported the same way, even with the same id). A card saved
+            with ePay v3 and never saved here is reported the same way:
+            save it again with a capture session, which gives the same id
+            for the same card and buyer email, and then update it.
           content:
             application/json:
               schema:
@@ -304,8 +306,10 @@ paths:
         On a capture session (`mode` `capture`) the card is saved on n1co
         as a reusable payment method for the session's customer, sent with
         your customer id, name, email and phone as they are stored when
-        the capture runs. Attempts that fail validation, are rejected or
-        succeed count against the session; when none are left it is
+        the capture runs. The answer's `card.id` is the payment method id
+        n1co answered: the card's id here and in ePay v3 alike. Attempts
+        that fail validation, are rejected or succeed count against the
+        session; when none are left it is
         canceled. A capture holds the session while it talks to n1co; a
         concurrent capture answers `409 card_session_in_progress`. When the
         result on n1co cannot be known the session is canceled and the
@@ -373,7 +377,7 @@ paths:
                 $ref: "#/components/schemas/CaptureResponse"
               example:
                 card:
-                  id: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                  id: 65f1c0ffee0123456789abcd
                   brand: visa
                   last4: "4242"
                   exp_month: 11
@@ -394,7 +398,7 @@ paths:
                 $ref: "#/components/schemas/CaptureResponse"
               example:
                 card:
-                  id: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                  id: 65f1c0ffee0123456789abcd
                   brand: visa
                   last4: "4242"
                   exp_month: 12
@@ -576,29 +580,29 @@ paths:
         order id already paid in the store is never charged again (see
         `last_error.code` `reference_already_paid`).
 
-        `payment_method` attaches a saved card of the customer with the given
-        `customer.id`,
-        chosen by your server (the browser never picks a saved card). The
-        SDK then confirms with the client secret alone to charge it, or
-        with a new card typed in its card element. The card must be
-        `active` and stays attached for the life of the intent; the intent
-        is returned with `card` set to it and `payment_method` showing it
-        with `saved: true`.
+        `payment_method` attaches a saved card, chosen by your server (the
+        browser never picks a saved card): its id, n1co's payment method id
+        (24 lowercase hexadecimal characters), the same value ePay v3
+        answers when a card is saved and takes as `cardId` on a charge, so
+        a card saved here or with v3 is attached the same way. The SDK then
+        confirms with the client secret alone to charge it, or with a new
+        card typed in its card element. The card stays attached for the
+        life of the intent and the intent is returned with `card` set to
+        it.
 
-        `payment_method` may instead be a card id your platform saved with
-        ePay v3 (24 lowercase hexadecimal characters, the `id` v3's
-        `/PaymentMethods` answered and you send as `cardId` to v3's
-        `/Charges`). Only its shape is checked: it has no card object here,
-        nothing is looked up and n1co is not called. A confirm without a
-        new card sends it to n1co as is, with the intent's customer, exactly
-        as a v3 charge does, and n1co decides: an id it does not know (or a
-        card of another store) fails the attempt with `last_error.code`
-        `card_unavailable`. The intent echoes it in `card`, and
-        `payment_method` is `saved: true` with `brand`, `last4` and the
-        expiry null (you received them when you saved the card in v3). Use
-        the same `customer.id` the card was saved with in v3. Such a card
-        cannot be updated with a card session: let the buyer save it again
-        through one, which gives you a `card_` id.
+        When the customer with this `customer.id` has a card with that id
+        here, it must be `active`, and `payment_method` shows it with
+        `saved: true` and its brand, last4 and expiry. Otherwise (a card
+        saved with ePay v3 and never saved here, or a card of another
+        customer or store) only its shape is checked: nothing is looked up
+        and n1co is not called. A confirm without a new card sends it to
+        n1co as is, with the intent's customer, exactly as a v3 charge
+        does, and n1co decides: an id it does not know (or a card of
+        another store) fails the attempt with `last_error.code`
+        `card_unavailable`. `payment_method` is then `saved: true` with
+        `brand`, `last4` and the expiry null (you received them when you
+        saved the card in v3). Use the same `customer.id` the card was
+        saved with in v3.
 
         `cvc_required: true` (only with `payment_method`) makes the SDK ask
         the payer for the attached card's security code: a confirm that
@@ -641,7 +645,7 @@ paths:
                   reference: order-8812
                   metadata:
                     cart: c-1029
-                  payment_method: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                  payment_method: 65f1c0ffee0123456789abcd
                   cvc_required: true
               v3Card:
                 summary: A card saved with ePay v3
@@ -654,7 +658,7 @@ paths:
                     email: ana.lopez@example.com
                     phone: "+503 7000-1234"
                   reference: order-8812
-                  payment_method: 65f1c0ffee0123456789abcd
+                  payment_method: 65f1c0ffee0123456789abce
       responses:
         "201":
           description: Intent created, with its client secret.
@@ -677,7 +681,7 @@ paths:
                     metadata: {cart: c-1029}
                     billing: null
                     page_origins: null
-                    card: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                    card: 65f1c0ffee0123456789abcd
                     payment_method: {brand: visa, last4: "4242", exp_month: 12, exp_year: 2030, saved: true}
                     cvc_required: true
                     save_card: true
@@ -707,7 +711,7 @@ paths:
                     metadata: {}
                     billing: null
                     page_origins: null
-                    card: 65f1c0ffee0123456789abcd
+                    card: 65f1c0ffee0123456789abce
                     payment_method: {brand: null, last4: null, exp_month: null, exp_year: null, saved: true}
                     cvc_required: false
                     save_card: true
@@ -739,8 +743,8 @@ paths:
             `invalid_reference`, `invalid_metadata`, `invalid_billing`,
             `missing_country`, `invalid_country`, `invalid_state`,
             `invalid_postal_code`, `invalid_page_origins`,
-            `invalid_payment_method` (neither a `card_` id nor a card id
-            saved with ePay v3, 24 lowercase hexadecimal characters),
+            `invalid_payment_method` (not a card id: 24 lowercase
+            hexadecimal characters),
             `invalid_cvc_required` (not a boolean),
             `cvc_required_without_card` (`cvc_required: true` without
             `payment_method`), `invalid_save_card` (not a boolean).
@@ -750,16 +754,6 @@ paths:
                 $ref: "#/components/schemas/Error"
         "401":
           $ref: "#/components/responses/Unauthorized"
-        "404":
-          description: |
-            `card_not_found`: `payment_method` is not a card of the customer
-            with this `customer.id` (cards of other customers of the store,
-            of a customer id not seen before and of other stores are reported
-            the same way).
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Error"
         "409":
           description: |
             `card_unavailable`: the `payment_method` card is `unavailable`
@@ -1448,7 +1442,7 @@ paths:
                 created_at: "2026-10-19T15:06:12Z"
                 data:
                   object:
-                    id: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                    id: 65f1c0ffee0123456789abcd
                     card_session: cs_VXBkYXRlU2Vzc2lvbkV4YW1w
                     brand: visa
                     last4: "4242"
@@ -1603,7 +1597,7 @@ x-webhooks:
               created_at: "2026-10-16T15:06:12Z"
               data:
                 object:
-                  id: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                  id: 65f1c0ffee0123456789abcd
                   card_session: cs_U2Vzc2lvbkV4YW1wbGUwMDAx
                   brand: visa
                   last4: "4242"
@@ -1641,7 +1635,7 @@ x-webhooks:
               created_at: "2026-10-19T15:06:12Z"
               data:
                 object:
-                  id: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                  id: 65f1c0ffee0123456789abcd
                   card_session: cs_VXBkYXRlU2Vzc2lvbkV4YW1w
                   brand: visa
                   last4: "4242"
@@ -1706,7 +1700,7 @@ x-webhooks:
                   description: Order 8812
                   reference: order-8812
                   metadata: {cart: c-1029}
-                  card: card_Q2FyZEV4YW1wbGUwMDAwMDAx
+                  card: 65f1c0ffee0123456789abcd
                   payment_method: {brand: visa, last4: "2701", exp_month: 12, exp_year: 2030, saved: true}
                   cvc_required: false
                   save_card: true
@@ -2097,12 +2091,15 @@ components:
             - type: "null"
         card:
           type: [string, "null"]
-          pattern: "^(card_[A-Za-z0-9_-]{24}|[0-9a-f]{24})$"
+          pattern: "^[0-9a-f]{24}$"
           description: |
-            A saved, `active` card of the customer with `customer.id` to
-            update (a card id saved with ePay v3 answers `404
-            card_not_found`); the session's `mode` is then `update`. Absent or null
-            for a session that saves a new card.
+            The id (n1co's payment method id) of a saved, `active` card of
+            the customer with `customer.id` to update; the session's `mode`
+            is then `update`. An id the customer has no card with here (a
+            card saved with ePay v3 and never saved here included) answers
+            `404 card_not_found`. Absent or null for a session that saves a
+            new card.
+          examples: [65f1c0ffee0123456789abcd]
     CardSessionMode:
       type: string
       enum: [capture, update]
@@ -2122,7 +2119,8 @@ components:
           $ref: "#/components/schemas/CardSessionMode"
         card:
           type: [string, "null"]
-          description: The card to update (update sessions); null for capture sessions.
+          pattern: "^[0-9a-f]{24}$"
+          description: The id of the card to update (update sessions), n1co's payment method id; null for capture sessions.
         status:
           type: string
           const: requires_card
@@ -2152,7 +2150,8 @@ components:
           description: 0 unless the status is requires_card.
         card:
           type: [string, "null"]
-          description: The captured card's id once completed (capture sessions); the card to update, from creation (update sessions).
+          pattern: "^[0-9a-f]{24}$"
+          description: The captured card's id once completed (capture sessions); the card to update, from creation (update sessions). It is n1co's payment method id (see `CaptureResponse`).
         page_origins:
           type: [array, "null"]
           items:
@@ -2258,7 +2257,17 @@ components:
           properties:
             id:
               type: string
-              pattern: "^card_[A-Za-z0-9_-]{24}$"
+              pattern: "^[0-9a-f]{24}$"
+              description: |
+                The card's id: n1co's payment method id, the same value
+                ePay v3 answers when a card is saved and takes as `cardId`
+                on a charge, so a card saved either way is charged either
+                way. n1co answers the same id for the same card and buyer
+                email, so capturing such a card again for the customer
+                reuses the customer's card and answers its id. Two customers of a store with
+                one email can each hold the same id: it is always used
+                with the customer's `customer.id`.
+              examples: [65f1c0ffee0123456789abcd]
             brand:
               $ref: "#/components/schemas/CardBrand"
             last4:
@@ -2412,7 +2421,8 @@ components:
       properties:
         id:
           type: string
-          pattern: "^card_[A-Za-z0-9_-]{24}$"
+          pattern: "^[0-9a-f]{24}$"
+          description: The card's id, n1co's payment method id (see `CaptureResponse`).
         card_session:
           type: string
           pattern: "^cs_[A-Za-z0-9_-]{24}$"
@@ -2567,13 +2577,16 @@ components:
             - type: "null"
         payment_method:
           type: [string, "null"]
-          pattern: "^(card_[A-Za-z0-9_-]{24}|[0-9a-f]{24})$"
+          pattern: "^[0-9a-f]{24}$"
           description: |
-            A saved, `active` card of the customer with `customer.id` to attach, or
-            a card id saved with ePay v3 (24 lowercase hexadecimal
-            characters; only its shape is checked). A confirm without `card`
-            charges it. It stays attached for the life of the intent.
-          examples: [card_Q2FyZEV4YW1wbGUwMDAwMDAx, 65f1c0ffee0123456789abcd]
+            The id of a saved card to attach: n1co's payment method id, as
+            this API shows it for cards saved here and as ePay v3 answers it
+            for cards saved there. A card of the customer with
+            `customer.id` must be `active`; any other id (a card saved with
+            ePay v3, typically) is checked for its shape only. A confirm
+            without `card` charges it. It stays attached for the life of
+            the intent.
+          examples: [65f1c0ffee0123456789abcd]
         cvc_required:
           type: [boolean, "null"]
           default: false
@@ -2640,8 +2653,8 @@ components:
       required: [brand, last4, exp_month, exp_year, saved]
       description: |
         The card of the current or last attempt, for display; at creation,
-        the attached card. For a card saved with ePay v3 only `saved: true`
-        is known: `brand`, `last4`, `exp_month` and `exp_year` are null
+        the attached card. For an attached card the customer has no card
+        with here (a card saved with ePay v3) only `saved: true` is known: `brand`, `last4`, `exp_month` and `exp_year` are null
         (n1co's charge answer carries no card details).
       properties:
         brand:
@@ -2754,10 +2767,11 @@ components:
           description: The partner page origins allowed to embed the n1co SDK for this intent; null when not bound.
         card:
           type: [string, "null"]
+          pattern: "^[0-9a-f]{24}$"
           description: |
-            The saved card of the current or last attempt. At creation, the
-            attached card (`payment_method` on create: a `card_` id or the
-            card id saved with ePay v3, as sent), or null when none
+            The id (n1co's payment method id) of the saved card of the
+            current or last attempt. At creation, the attached card
+            (`payment_method` on create, as sent), or null when none
             was attached. After an attempt with a new card, null (checkout
             never saves a card), unless the customer had that card saved:
             then that saved card's id. A later confirm without a card
@@ -2910,6 +2924,8 @@ components:
             type: string
         card:
           type: [string, "null"]
+          pattern: "^[0-9a-f]{24}$"
+          description: The id (n1co's payment method id) of the saved card of the current or last attempt, as in the payment intent.
         payment_method:
           oneOf:
             - $ref: "#/components/schemas/PaymentMethodSummary"

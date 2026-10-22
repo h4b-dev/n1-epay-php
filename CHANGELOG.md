@@ -6,6 +6,14 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Changed
+
+- Contract 0.14.0 (`N1co::CONTRACT_VERSION`). A card's `id` is n1co's payment method id: 24
+  lowercase hexadecimal characters, the value ePay v3 answers and takes as `cardId`. The `card_`
+  shape is gone from `Card`, card sessions, `payment_method` and the intent's `card`.
+  `paymentIntents->create()` no longer answers `404 card_not_found`; `cardSessions->create()` with
+  `card` still does.
+
 ### Added
 
 - Contract 0.13.0 (`N1co::CONTRACT_VERSION`). `paymentIntents->create()` accepts `save_card`

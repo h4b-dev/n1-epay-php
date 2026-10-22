@@ -36,7 +36,7 @@ final class ModelsTest extends TestCase
         $example = Spec::examples(Spec::map(Spec::map(Spec::map(Spec::operation('POST', '/v1/payment_intents')['responses'] ?? null)['201'] ?? null)['content'] ?? null)['application/json'] ?? null);
         $data = Spec::map($example[1] ?? null);
         $intent = PaymentIntent::fromArray($data);
-        self::assertSame('65f1c0ffee0123456789abcd', $intent->card);
+        self::assertSame('65f1c0ffee0123456789abce', $intent->card);
         $summary = $intent->payment_method;
         self::assertNotNull($summary);
         self::assertNull($summary->brand);

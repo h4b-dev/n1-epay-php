@@ -18,7 +18,7 @@ use PHPUnit\Framework\TestCase;
 final class ApiTest extends TestCase
 {
     private const CUSTOMER = ['id' => 'cust-1001', 'name' => 'Ana López', 'email' => 'ana.lopez@example.com', 'phone' => '+503 7000-1234'];
-    private const CARD = 'card_Q2FyZEV4YW1wbGUwMDAwMDAx';
+    private const CARD = '65f1c0ffee0123456789abcd';
     private const INTENT = 'pi_UGF5bWVudEludGVudEV4YW1w';
     private const EVENT = 'evt_RXZlbnRFeGFtcGxlMDAwMDAx';
 

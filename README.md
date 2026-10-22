@@ -105,16 +105,19 @@ $intent = $n1co->paymentIntents->create([
     'amount' => 1250,
     'currency' => 'USD',
     'customer' => $customer,
-    'payment_method' => 'card_…', // your server picks the card, never the page
+    'payment_method' => '65f1c0ffee0123456789abcd', // your server picks the card, never the page
     'cvc_required' => true,       // n1co.js asks the buyer for the security code
 ]);
 ```
 
-`payment_method` also accepts the id of a card you saved with ePay v3 (24 lowercase hexadecimal
-characters). Only its shape is checked; n1co decides when it is charged, and an id it does not
-know fails the attempt with `last_error->code` `card_unavailable`. Such an intent shows that id in
-`card`, and its `payment_method` has `saved === true` with `brand`, `last4`, `exp_month` and
-`exp_year` null. A card session cannot update it (`404 card_not_found`): save the card again.
+A card's `id` is n1co's payment method id (24 lowercase hexadecimal characters), the same value
+ePay v3 answers when a card is saved and takes as `cardId` on a charge. `payment_method` takes it
+whether the card was saved here or with v3. An id the customer has no card with here is only
+checked for its shape; n1co decides when it is charged, and an id it does not know fails the
+attempt with `last_error->code` `card_unavailable`. Such an intent's `payment_method` has
+`saved === true` with `brand`, `last4`, `exp_month` and `exp_year` null. A card session cannot
+update a card saved only with v3 (`404 card_not_found` on `cardSessions->create()`): save the
+card again with a capture session, which gives the same id, and then update it.
 
 ### Single-use card
 
@@ -127,7 +130,7 @@ card typed in the card element is single use at n1co and ePay saves nothing. The
 A reissued card (same number, new expiry) is updated, not saved again:
 
 ```php
-$session = $n1co->cardSessions->create(['customer' => $customer, 'card' => 'card_…']);
+$session = $n1co->cardSessions->create(['customer' => $customer, 'card' => '65f1c0ffee0123456789abcd']);
 // $session->mode === CardSessionMode::UPDATE. The card keeps its id; you get card.updated.
 ```
 
@@ -319,7 +322,7 @@ so a status added to the API later does not break your code.
 
 | SDK   | API contract |
 | ----- | ------------ |
-| 0.1.x | 0.13.0       |
+| 0.1.x | 0.14.0       |
 
 `N1co::VERSION` and `N1co::CONTRACT_VERSION` hold them. Until 1.0, a minor version may change
 the API surface along with the contract. From 1.0 the SDK follows semantic versioning.

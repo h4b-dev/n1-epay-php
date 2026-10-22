@@ -15,8 +15,8 @@ final class PaymentIntents
 
     /**
      * Creates an intent. Pass `client_secret` (shown only once) to n1co.js. `payment_method`
-     * attaches a saved card (a `card_` id, or a card id saved with ePay v3: 24 lowercase
-     * hexadecimal characters); `cvc_required` makes n1co.js ask for its security code.
+     * attaches a saved card by its id (n1co's payment method id: 24 lowercase
+     * hexadecimal characters, as saved here or with ePay v3); `cvc_required` makes n1co.js ask for its security code.
      * `save_card` (bool, default `true`): `false` makes a new card single use at n1co and ePay
      * saves nothing; a non-boolean is `InvalidRequestException` `invalid_save_card`.
      * `reference` is your order id, sent to n1co as the order id of every charge: one paid intent

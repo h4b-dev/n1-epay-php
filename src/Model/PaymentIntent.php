@@ -10,7 +10,7 @@ use N1co\EPay\ResponseInfo;
 /**
  * A payment intent. `client_secret` is set in the answers of paymentIntents->create() (always a string) and
  * paymentIntents->retrieve() (null for intents created before API 0.12.0); it is null in the other answers.
- * `card` is a `card_` id or a card id saved with ePay v3 (24 lowercase hexadecimal characters), as sent.
+ * `card` is the id of the attached card, n1co's payment method id (24 lowercase hexadecimal characters), as sent.
  */
 final readonly class PaymentIntent
 {
