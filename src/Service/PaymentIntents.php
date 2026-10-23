@@ -14,7 +14,7 @@ final class PaymentIntents
     public function __construct(private readonly HttpClient $http) {}
 
     /**
-     * Creates an intent. Pass `client_secret` (shown only once) to n1co.js. `payment_method`
+     * Creates an intent. Pass `intent_token` (shown only once) to n1co.js. `payment_method`
      * attaches a saved card by its id (n1co's payment method id: 24 lowercase
      * hexadecimal characters, as saved here or with ePay v3); `cvc_required` makes n1co.js ask for its security code.
      * `save_card` (bool, default `true`): `false` makes a new card single use at n1co and ePay
@@ -32,7 +32,7 @@ final class PaymentIntents
     }
 
     /**
-     * Retrieves an intent, with its `client_secret` (null for intents created before API 0.12.0), so an
+     * Retrieves an intent, with its `intent_token` (null for intents created before API 0.12.0), so an
      * open intent can be resumed from a new page.
      *
      * @param array{timeout?: int|float} $options

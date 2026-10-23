@@ -237,7 +237,7 @@ final class FakeApi
         $example = fn(string $id): array => $this->compile($id, ...$this->locate($id))['example'];
         $intent = static function () use ($example): array {
             $intent = $example('createPaymentIntent');
-            unset($intent['client_secret']);
+            unset($intent['intent_token']);
 
             return $intent;
         };
@@ -250,7 +250,7 @@ final class FakeApi
                 ], isset($input['card']) ? ['mode' => 'update', 'card' => $input['card']] : ['mode' => 'capture', 'card' => null]);
             case 'getCardSession':
                 $session = $example('createCardSession');
-                unset($session['client_secret']);
+                unset($session['session_token']);
 
                 return array_merge($session, ['id' => $ids['id'], 'created_at' => '2026-10-16T15:04:05Z']);
             case 'createPaymentIntent':
@@ -273,7 +273,7 @@ final class FakeApi
 
                 return $created;
             case 'getPaymentIntent':
-                return array_merge($intent(), ['id' => $ids['id'], 'client_secret' => $example('createPaymentIntent')['client_secret']]);
+                return array_merge($intent(), ['id' => $ids['id'], 'intent_token' => $example('createPaymentIntent')['intent_token']]);
             case 'cancelPaymentIntent':
                 return array_merge($intent(), [
                     'id' => $ids['id'],

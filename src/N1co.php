@@ -26,7 +26,7 @@ final class N1co
     /** Version of this SDK. */
     public const VERSION = '0.1.0';
     /** Version of the n1co ePay API contract (spec/openapi.yaml) this SDK was built against. */
-    public const CONTRACT_VERSION = '0.14.0';
+    public const CONTRACT_VERSION = '0.15.0';
     /** Production API (the default). */
     public const DEFAULT_BASE_URL = 'https://api-epay.n1co.com';
     /** Development API. */
@@ -64,7 +64,7 @@ final class N1co
     {
         if (preg_match('/^sk_[A-Za-z0-9_-]{32}$/', $secretKey) !== 1) {
             // Never echo the value: it may be a real key with a typo.
-            throw new \InvalidArgumentException('A secret key (sk_ followed by 32 characters) is required. Never use the secret key in a browser; n1co.js uses client secrets.');
+            throw new \InvalidArgumentException('A secret key (sk_ followed by 32 characters) is required. Never use the secret key in a browser; n1co.js uses tokens.');
         }
         foreach (array_keys($options) as $name) {
             if (!\in_array($name, self::OPTIONS, true)) {

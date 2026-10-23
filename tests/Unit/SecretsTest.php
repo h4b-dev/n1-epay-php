@@ -33,9 +33,9 @@ final class SecretsTest extends TestCase
         self::assertStringContainsString('SensitiveParameterValue', $output);
         self::assertStringContainsString('[args]', $output);
 
-        $clientSecret = (string) Spec::string(Examples::response('POST', '/v1/payment_intents')['client_secret'] ?? null);
-        self::assertNotSame('', $clientSecret);
-        foreach ([Spec::SECRET_KEY, substr(Spec::SECRET_KEY, 3), Spec::WEBHOOK_SECRET, substr(Spec::WEBHOOK_SECRET, 6), $clientSecret] as $secret) {
+        $intentToken = (string) Spec::string(Examples::response('POST', '/v1/payment_intents')['intent_token'] ?? null);
+        self::assertNotSame('', $intentToken);
+        foreach ([Spec::SECRET_KEY, substr(Spec::SECRET_KEY, 3), Spec::WEBHOOK_SECRET, substr(Spec::WEBHOOK_SECRET, 6), $intentToken] as $secret) {
             self::assertStringNotContainsString($secret, $output);
         }
     }

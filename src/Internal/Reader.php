@@ -31,7 +31,7 @@ final class Reader
     }
 
     /**
-     * Keeps the data (which may hold client secrets) out of var_dump(), print_r() and traces.
+     * Keeps the data (which may hold tokens) out of var_dump(), print_r() and traces.
      *
      * @return array<string, mixed>
      */

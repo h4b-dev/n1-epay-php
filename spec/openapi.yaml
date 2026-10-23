@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: n1co ePay API
-  version: "0.14.0"
+  version: "0.15.0"
   description: |
     Partner-facing payments API in front of the n1co Integration API v3.
     Errors are JSON: `{"error":{"code":"...","message":"...","details":{...}}}`;
@@ -164,11 +164,10 @@ paths:
         Creates a card session for a customer of the authenticated store. The
         customer travels inline with your own id: the first request with an
         id creates the customer, later ones replace its name, email and
-        phone. Pass
-        `client_secret` to the n1co SDK's card element in the buyer's browser; it
-        is returned only here, valid for one card, until `expires_at`
-        (`CARD_SESSION_TTL`, default 15 minutes) and for `attempts_remaining`
-        capture attempts. Never send the secret key to a browser.
+        phone. Pass `session_token` to the n1co SDK's card element in the
+        buyer's browser; it is returned only here, valid for one card, until
+        `expires_at` (`CARD_SESSION_TTL`, default 15 minutes) and for
+        `attempts_remaining` capture attempts. Never send the secret key to a browser.
 
         Without `card` the session saves a new card (`mode` `capture`).
         With `card`, a saved, `active` card of the customer with this
@@ -213,7 +212,7 @@ paths:
                 capture:
                   value:
                     id: cs_U2Vzc2lvbkV4YW1wbGUwMDAx
-                    client_secret: cs_U2Vzc2lvbkV4YW1wbGUwMDAx_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+                    session_token: cs_U2Vzc2lvbkV4YW1wbGUwMDAx_token_U2Vzc2lvblRva2VuRXhhbXBsZTAwMDAw
                     mode: capture
                     card: null
                     status: requires_card
@@ -223,7 +222,7 @@ paths:
                 update:
                   value:
                     id: cs_VXBkYXRlU2Vzc2lvbkV4YW1w
-                    client_secret: cs_VXBkYXRlU2Vzc2lvbkV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+                    session_token: cs_VXBkYXRlU2Vzc2lvbkV4YW1w_token_U2Vzc2lvblRva2VuRXhhbXBsZTAwMDAw
                     mode: update
                     card: 65f1c0ffee0123456789abcd
                     status: requires_card
@@ -294,7 +293,7 @@ paths:
       description: |
         Called by the n1co SDK's card element through the tokenization proxy,
         never by partners. The proxy replaces `card.number` and `card.cvc`
-        with vault aliases and adds `X-N1co-Proxy-Key`; `client_secret`
+        with vault aliases and adds `X-N1co-Proxy-Key`; `session_token`
         identifies and authorises the card session. Every value given for
         `card.number` and `card.cvc` must be an alias (matching
         `CAPTURE_ALIAS_PATTERN`, not 3-19 digits, no run of 12 or more
@@ -352,7 +351,7 @@ paths:
             examples:
               capture:
                 value:
-                  client_secret: cs_U2Vzc2lvbkV4YW1wbGUwMDAx_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+                  session_token: cs_U2Vzc2lvbkV4YW1wbGUwMDAx_token_U2Vzc2lvblRva2VuRXhhbXBsZTAwMDAw
                   card:
                     number: tok_sandbox_Q2FyZE51bWJlckFsaWFz
                     cvc: tok_sandbox_U2VjdXJpdHlDb2RlQWxpYXM
@@ -363,7 +362,7 @@ paths:
                     brand: visa
               update:
                 value:
-                  client_secret: cs_VXBkYXRlU2Vzc2lvbkV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+                  session_token: cs_VXBkYXRlU2Vzc2lvbkV4YW1w_token_U2Vzc2lvblRva2VuRXhhbXBsZTAwMDAw
                   card:
                     cvc: tok_sandbox_U2VjdXJpdHlDb2RlQWxpYXM
                     exp_month: 11
@@ -443,7 +442,7 @@ paths:
               schema:
                 $ref: "#/components/schemas/Error"
         "404":
-          description: "`card_session_not_found`: the client secret is malformed, unknown or wrong."
+          description: "`card_session_not_found`: the session token is malformed, unknown or wrong."
           content:
             application/json:
               schema:
@@ -477,7 +476,7 @@ paths:
                 $ref: "#/components/schemas/Error"
         "429":
           description: |
-            `rate_limited`: once the client secret matched, more than 10
+            `rate_limited`: once the session token matched, more than 10
             captures per minute for the session or
             `CAPTURE_RATE_LIMIT_GLOBAL` (default 300) in total. Failed
             lookups are not limited by the service (see the README).
@@ -557,7 +556,7 @@ paths:
         States what a customer of the authenticated store owes. The customer
         travels inline with your own id, as for card sessions: it is created
         or updated (name, email and phone replaced) by this request. Pass
-        `client_secret` to the n1co SDK in the payer's browser; it is
+        `intent_token` to the n1co SDK in the payer's browser; it is
         returned here and by `GET /v1/payment_intents/{id}`, and is valid
         until the intent succeeds, is canceled or expires
         (`PAYMENT_INTENT_TTL`, default 1 hour). Never send the secret key to
@@ -572,7 +571,7 @@ paths:
         `409 reference_already_paid`, and with the reference of an intent
         still open (`requires_payment_method`, `requires_action` or
         `processing`) `409 reference_in_use`; `details.payment_intent` is
-        that intent. Resume the open one (its client secret is in `GET
+        that intent. Resume the open one (its intent token is in `GET
         /v1/payment_intents/{id}`) or cancel it and create again: a
         `canceled` or expired intent frees its reference. References are
         trimmed and compared without regard to case, as n1co compares order
@@ -585,7 +584,7 @@ paths:
         (24 lowercase hexadecimal characters), the same value ePay v3
         answers when a card is saved and takes as `cardId` on a charge, so
         a card saved here or with v3 is attached the same way. The SDK then
-        confirms with the client secret alone to charge it, or with a new
+        confirms with the intent token alone to charge it, or with a new
         card typed in its card element. The card stays attached for the
         life of the intent and the intent is returned with `card` set to
         it.
@@ -661,7 +660,7 @@ paths:
                   payment_method: 65f1c0ffee0123456789abce
       responses:
         "201":
-          description: Intent created, with its client secret.
+          description: Intent created, with its intent token.
           content:
             application/json:
               schema:
@@ -672,7 +671,7 @@ paths:
                   value:
                     id: pi_UGF5bWVudEludGVudEV4YW1w
                     object: payment_intent
-                    client_secret: pi_UGF5bWVudEludGVudEV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+                    intent_token: pi_UGF5bWVudEludGVudEV4YW1w_token_SW50ZW50VG9rZW5FeGFtcGxlMDAwMDAw
                     status: requires_payment_method
                     amount: 1250
                     currency: USD
@@ -702,7 +701,7 @@ paths:
                   value:
                     id: pi_UGF5bWVudEludGVudEV4YW1w
                     object: payment_intent
-                    client_secret: pi_UGF5bWVudEludGVudEV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+                    intent_token: pi_UGF5bWVudEludGVudEV4YW1w_token_SW50ZW50VG9rZW5FeGFtcGxlMDAwMDAw
                     status: requires_payment_method
                     amount: 1250
                     currency: USD
@@ -767,7 +766,7 @@ paths:
             `reference_in_use`: an intent of the store with this `reference`
             is still open (`requires_payment_method`, `requires_action` or
             `processing`); `details.payment_intent` is its id. Hand its
-            client secret (from `GET /v1/payment_intents/{id}`) to the SDK,
+            intent token (from `GET /v1/payment_intents/{id}`) to the SDK,
             or cancel it and create again. Without `details`, another request
             created an intent with this reference at the same moment.
           content:
@@ -807,17 +806,18 @@ paths:
       operationId: getPaymentIntent
       summary: Retrieve a payment intent
       description: |
-        The intent with its client secret, so your server can hand an open
+        The intent with its intent token, so your server can hand an open
         intent (for example one a create refused with `reference_in_use`)
-        to the n1co SDK again. `client_secret` is `null` for intents
-        created before version 0.12.0, whose secret was only kept as a
-        hash. Due transitions are applied before it is returned: an expired
+        to the n1co SDK again. `intent_token` is `null` when the token was
+        not kept or predates 0.15.0: intents created before version
+        0.12.0 only kept its hash, and tokens issued before 0.15.0 have a
+        format no endpoint accepts. Due transitions are applied before it is returned: an expired
         intent is `canceled` (`expired`), and an intent whose 3D Secure
         deadline passed is back to `requires_payment_method` with
         `last_error.code` `authentication_expired`.
       responses:
         "200":
-          description: The intent, with its client secret.
+          description: The intent, with its intent token.
           content:
             application/json:
               schema:
@@ -874,7 +874,7 @@ paths:
       description: |
         Called by the n1co SDK through the tokenization proxy, never by
         partners. Returns the client view of the intent identified by
-        `client_secret`, which shows the attached card (if any) in
+        `intent_token`, which shows the attached card (if any) in
         `payment_method`. Saved cards are never listed to the browser.
 
         Shared rules of the SDK endpoints: `X-N1co-Proxy-Key` is required;
@@ -882,11 +882,11 @@ paths:
         `OPTIONS`); bodies up to 16 KiB with exact keys and no repeated
         keys; every `card.number` and `card.cvc` value must be a vault
         alias (`503 capture_not_tokenized` otherwise, checked first); a
-        malformed, unknown or wrong client secret answers `404
+        malformed, unknown or wrong intent token answers `404
         payment_intent_not_found`. Every body may carry `page_origin`, the
         origin of the partner page embedding the SDK as its frame learned
         it from its handshake; when the intent has `page_origins` it must be
-        one of them (`403 page_origin_not_allowed`). Once the client secret
+        one of them (`403 page_origin_not_allowed`). Once the intent token
         matched, 10 requests per minute per intent and
         `CHECKOUT_RATE_LIMIT_GLOBAL` (default 300) in total. Every response
         carries `Cache-Control: no-store`.
@@ -899,9 +899,9 @@ paths:
             schema:
               type: object
               additionalProperties: false
-              required: [client_secret]
+              required: [intent_token]
               properties:
-                client_secret:
+                intent_token:
                   type: string
                 page_origin:
                   $ref: "#/components/schemas/PageOrigin"
@@ -1022,7 +1022,7 @@ paths:
             examples:
               newCard:
                 value:
-                  client_secret: pi_UGF5bWVudEludGVudEV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+                  intent_token: pi_UGF5bWVudEludGVudEV4YW1w_token_SW50ZW50VG9rZW5FeGFtcGxlMDAwMDAw
                   card:
                     number: tok_sandbox_Q2FyZE51bWJlckFsaWFz
                     cvc: tok_sandbox_U2VjdXJpdHlDb2RlQWxpYXM
@@ -1033,10 +1033,10 @@ paths:
                     brand: visa
               attachedCard:
                 value:
-                  client_secret: pi_UGF5bWVudEludGVudEV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+                  intent_token: pi_UGF5bWVudEludGVudEV4YW1w_token_SW50ZW50VG9rZW5FeGFtcGxlMDAwMDAw
               attachedCardWithCode:
                 value:
-                  client_secret: pi_UGF5bWVudEludGVudEV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+                  intent_token: pi_UGF5bWVudEludGVudEV4YW1w_token_SW50ZW50VG9rZW5FeGFtcGxlMDAwMDAw
                   card:
                     cvc: tok_sandbox_U2VjdXJpdHlDb2RlQWxpYXM
       responses:
@@ -1127,7 +1127,7 @@ paths:
             schema:
               $ref: "#/components/schemas/PaymentIntentCompleteRequest"
             example:
-              client_secret: pi_UGF5bWVudEludGVudEV4YW1w_secret_U2VjcmV0RXhhbXBsZTAwMDAwMDAwMDAw
+              intent_token: pi_UGF5bWVudEludGVudEV4YW1w_token_SW50ZW50VG9rZW5FeGFtcGxlMDAwMDAw
               authentication_id: 6f1c2b9e-1d2a-4b8e-9f3c-2a7d5e1b0c44
               outcome: succeeded
       responses:
@@ -1903,7 +1903,7 @@ components:
           schema:
             $ref: "#/components/schemas/Error"
     PaymentIntentNotFound:
-      description: "`payment_intent_not_found`: no intent with this id in the authenticated store, or (SDK endpoints) a malformed, unknown or wrong client secret."
+      description: "`payment_intent_not_found`: no intent with this id in the authenticated store, or (SDK endpoints) a malformed, unknown or wrong intent token."
       content:
         application/json:
           schema:
@@ -1949,7 +1949,7 @@ components:
         `invalid_request`: the body is not one JSON object, or a field is
         invalid. `details.field` is the dotted path (`card.exp_month`,
         `billing.country`...) and `details.code` one of `duplicate_field`,
-        `unknown_field`, `missing_client_secret`, the card codes of
+        `unknown_field`, `missing_intent_token`, the card codes of
         `/v1/capture` (`invalid_card` also for a saved card id,
         `missing_number` ... `invalid_brand`, `card_expired`),
         `payment_method_required` (`details.field` `card`: a confirm
@@ -1992,7 +1992,7 @@ components:
             $ref: "#/components/schemas/Error"
     SDKRateLimited:
       description: |
-        `rate_limited`: once the client secret matched, more than 10
+        `rate_limited`: once the intent token matched, more than 10
         requests per minute for the intent or `CHECKOUT_RATE_LIMIT_GLOBAL`
         (default 300) in total.
       headers:
@@ -2106,14 +2106,14 @@ components:
       description: "`capture` saves a new card; `update` updates the saved card in `card`."
     CardSessionCreated:
       type: object
-      required: [id, client_secret, mode, card, status, attempts_remaining, page_origins, expires_at]
+      required: [id, session_token, mode, card, status, attempts_remaining, page_origins, expires_at]
       properties:
         id:
           type: string
           pattern: "^cs_[A-Za-z0-9_-]{24}$"
-        client_secret:
+        session_token:
           type: string
-          pattern: "^cs_[A-Za-z0-9_-]{24}_secret_[A-Za-z0-9_-]{32}$"
+          pattern: "^cs_[A-Za-z0-9_-]{24}_token_[A-Za-z0-9_-]{32}$"
           description: For the n1co SDK's card element only. Returned once; only its hash is stored.
         mode:
           $ref: "#/components/schemas/CardSessionMode"
@@ -2169,9 +2169,9 @@ components:
     CaptureRequest:
       type: object
       additionalProperties: false
-      required: [client_secret, card]
+      required: [session_token, card]
       properties:
-        client_secret:
+        session_token:
           type: string
         page_origin:
           $ref: "#/components/schemas/PageOrigin"
@@ -2495,8 +2495,8 @@ components:
         lowercase `https://host[:port]` without the default port or a path,
         or `http://localhost` / `http://127.0.0.1` with any port for
         development. When set, the SDK must report one of them as
-        `page_origin` (defence in depth against a leaked client secret used
-        from another site).
+        `page_origin` (defence in depth against a leaked intent or session
+        token used from another site).
     PageOrigin:
       type: [string, "null"]
       maxLength: 2048
@@ -2606,9 +2606,9 @@ components:
     PaymentIntentConfirmRequest:
       type: object
       additionalProperties: false
-      required: [client_secret]
+      required: [intent_token]
       properties:
-        client_secret:
+        intent_token:
           type: string
         card:
           description: |
@@ -2631,9 +2631,9 @@ components:
     PaymentIntentCompleteRequest:
       type: object
       additionalProperties: false
-      required: [client_secret, authentication_id, outcome]
+      required: [intent_token, authentication_id, outcome]
       properties:
-        client_secret:
+        intent_token:
           type: string
         authentication_id:
           type: string
@@ -2835,22 +2835,22 @@ components:
       allOf:
         - $ref: "#/components/schemas/PaymentIntent"
         - type: object
-          required: [client_secret]
+          required: [intent_token]
           properties:
-            client_secret:
+            intent_token:
               type: string
-              pattern: "^pi_[A-Za-z0-9_-]{24}_secret_[A-Za-z0-9_-]{32}$"
+              pattern: "^pi_[A-Za-z0-9_-]{24}_token_[A-Za-z0-9_-]{32}$"
               description: For the n1co SDK only. Also returned by `GET /v1/payment_intents/{id}`; stored as its hash and encrypted.
     PaymentIntentRetrieved:
       allOf:
         - $ref: "#/components/schemas/PaymentIntent"
         - type: object
-          required: [client_secret]
+          required: [intent_token]
           properties:
-            client_secret:
+            intent_token:
               type: [string, "null"]
-              pattern: "^pi_[A-Za-z0-9_-]{24}_secret_[A-Za-z0-9_-]{32}$"
-              description: For the n1co SDK only; never send it anywhere else. `null` for intents created before version 0.12.0.
+              pattern: "^pi_[A-Za-z0-9_-]{24}_token_[A-Za-z0-9_-]{32}$"
+              description: For the n1co SDK only; never send it anywhere else. `null` when the token was not kept or predates 0.15.0.
     PaymentIntentClient:
       type: object
       description: |

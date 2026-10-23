@@ -8,11 +8,11 @@ use N1co\EPay\Internal\Reader;
 use N1co\EPay\ResponseInfo;
 
 /**
- * The answer of cardSessions->create(): the session with its `client_secret`, shown only once.
+ * The answer of cardSessions->create(): the session with its `session_token`, shown only once.
  */
 final readonly class CardSessionCreated
 {
-    private const KNOWN = ['id', 'client_secret', 'mode', 'card', 'status', 'attempts_remaining', 'page_origins', 'expires_at'];
+    private const KNOWN = ['id', 'session_token', 'mode', 'card', 'status', 'attempts_remaining', 'page_origins', 'expires_at'];
 
     /**
      * @param string $mode One of CardSessionMode::ALL, or a value added to the API later.
@@ -23,7 +23,7 @@ final readonly class CardSessionCreated
      */
     public function __construct(
         public string $id,
-        public string $client_secret,
+        public string $session_token,
         public string $mode,
         public ?string $card,
         public string $status,
@@ -51,7 +51,7 @@ final readonly class CardSessionCreated
     {
         return new self(
             id: $r->string('id'),
-            client_secret: $r->string('client_secret'),
+            session_token: $r->string('session_token'),
             mode: $r->string('mode'),
             card: $r->nullableString('card'),
             status: $r->string('status'),
@@ -72,7 +72,7 @@ final readonly class CardSessionCreated
     {
         $data = [
             'id' => $this->id,
-            'client_secret' => $this->client_secret,
+            'session_token' => $this->session_token,
             'mode' => $this->mode,
             'card' => $this->card,
             'status' => $this->status,

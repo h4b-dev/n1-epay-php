@@ -40,7 +40,7 @@ try {
     $dump('webhook_secret', $e);
 }
 
-// An API error and an unreadable answer that carries a client secret.
+// An API error and an unreadable answer that carries a token.
 $transport = new FakeTransport(
     FakeTransport::error(401, 'invalid_api_key'),
     FakeTransport::json(201, ['status' => 7] + $intent),

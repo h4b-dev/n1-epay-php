@@ -102,7 +102,7 @@ final class ApiTest extends TestCase
     public function testCreatesAnIntentWithoutASavedCard(): void
     {
         $intent = $this->n1co->paymentIntents->create(['amount' => 100, 'currency' => 'USD', 'customer' => self::CUSTOMER]);
-        self::assertMatchesRegularExpression('/^pi_[A-Za-z0-9_-]{24}_secret_/', (string) $intent->client_secret);
+        self::assertMatchesRegularExpression('/^pi_[A-Za-z0-9_-]{24}_token_/', (string) $intent->intent_token);
         self::assertSame(100, $intent->amount);
         self::assertNull($intent->payment_method);
     }
@@ -122,10 +122,10 @@ final class ApiTest extends TestCase
         self::assertSame([], $this->fake->violations());
     }
 
-    public function testRetrieveCarriesTheClientSecret(): void
+    public function testRetrieveCarriesTheIntentToken(): void
     {
         $intent = $this->n1co->paymentIntents->retrieve(self::INTENT);
-        self::assertMatchesRegularExpression('/^pi_[A-Za-z0-9_-]{24}_secret_/', (string) $intent->client_secret);
+        self::assertMatchesRegularExpression('/^pi_[A-Za-z0-9_-]{24}_token_/', (string) $intent->intent_token);
         self::assertSame([], $this->fake->violations());
     }
 

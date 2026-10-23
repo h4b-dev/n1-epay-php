@@ -129,24 +129,24 @@ final class ServicesTest extends TestCase
         self::assertCount($sent, $transport->requests);
     }
 
-    public function testCreateReturnsTheClientSecretOnce(): void
+    public function testCreateReturnsTheIntentTokenOnce(): void
     {
         $transport = new FakeTransport(FakeTransport::json(201, Examples::response('POST', '/v1/payment_intents')), FakeTransport::json(200, Examples::intent()));
         $n1co = TestClient::make($transport);
         $created = $n1co->paymentIntents->create(['amount' => 1250, 'currency' => 'USD', 'customer' => self::CUSTOMER]);
-        self::assertNotNull($created->client_secret);
+        self::assertNotNull($created->intent_token);
         self::assertSame(201, $created->lastResponse?->status);
         $read = $n1co->paymentIntents->retrieve($created->id);
-        self::assertNull($read->client_secret);
-        self::assertArrayNotHasKey('client_secret', $read->toArray());
+        self::assertNull($read->intent_token);
+        self::assertArrayNotHasKey('intent_token', $read->toArray());
     }
 
-    public function testRetrieveReadsTheClientSecretOrItsNull(): void
+    public function testRetrieveReadsTheIntentTokenOrItsNull(): void
     {
-        $secret = Examples::response('POST', '/v1/payment_intents')['client_secret'];
-        $transport = new FakeTransport(FakeTransport::json(200, ['client_secret' => $secret] + Examples::intent()), FakeTransport::json(200, ['client_secret' => null] + Examples::intent()));
+        $token = Examples::response('POST', '/v1/payment_intents')['intent_token'];
+        $transport = new FakeTransport(FakeTransport::json(200, ['intent_token' => $token] + Examples::intent()), FakeTransport::json(200, ['intent_token' => null] + Examples::intent()));
         $n1co = TestClient::make($transport);
-        self::assertSame($secret, $n1co->paymentIntents->retrieve('pi_UGF5bWVudEludGVudEV4YW1w')->client_secret);
-        self::assertNull($n1co->paymentIntents->retrieve('pi_UGF5bWVudEludGVudEV4YW1w')->client_secret);
+        self::assertSame($token, $n1co->paymentIntents->retrieve('pi_UGF5bWVudEludGVudEV4YW1w')->intent_token);
+        self::assertNull($n1co->paymentIntents->retrieve('pi_UGF5bWVudEludGVudEV4YW1w')->intent_token);
     }
 }

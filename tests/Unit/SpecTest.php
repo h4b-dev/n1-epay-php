@@ -21,8 +21,8 @@ final class SpecTest extends TestCase
         'CardSession' => Model\CardSession::class,
         'CardSessionCreated' => Model\CardSessionCreated::class,
         'PaymentIntent' => Model\PaymentIntent::class,
-        'PaymentIntentRetrieved' => Model\PaymentIntent::class, // PaymentIntent with a nullable client_secret
-        'PaymentIntentCreated' => Model\PaymentIntent::class, // PaymentIntent with client_secret
+        'PaymentIntentRetrieved' => Model\PaymentIntent::class, // PaymentIntent with a nullable intent_token
+        'PaymentIntentCreated' => Model\PaymentIntent::class, // PaymentIntent with intent_token
         'PaymentIntentEventObject' => Model\PaymentIntentEventObject::class,
         'PaymentMethodSummary' => Model\PaymentMethodSummary::class,
         'Billing' => Model\Billing::class,
@@ -90,7 +90,7 @@ final class SpecTest extends TestCase
             $properties = self::properties(Spec::deref(Spec::at('#/components/schemas/' . $schema)));
             $fields = array_values(array_diff(self::fields($class), ['extra', 'lastResponse']));
             if ($schema === 'PaymentIntent') {
-                $fields = array_values(array_diff($fields, ['client_secret']));
+                $fields = array_values(array_diff($fields, ['intent_token']));
             }
             sort($properties);
             sort($fields);

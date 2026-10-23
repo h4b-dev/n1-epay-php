@@ -35,7 +35,7 @@ final class Examples
     public static function intent(): array
     {
         $intent = self::response('POST', '/v1/payment_intents');
-        unset($intent['client_secret']);
+        unset($intent['intent_token']);
 
         return $intent;
     }
@@ -46,7 +46,7 @@ final class Examples
     public static function session(): array
     {
         $session = self::response('POST', '/v1/card_sessions');
-        unset($session['client_secret']);
+        unset($session['session_token']);
 
         return $session + ['created_at' => '2026-10-16T15:04:05Z'];
     }

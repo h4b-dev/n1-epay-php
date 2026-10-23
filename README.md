@@ -1,7 +1,7 @@
 # n1co/epay
 
 Server-side SDK of the n1co ePay API for PHP. It runs on your server with the store's secret key
-(`sk_…`). The browser side is n1co.js, which uses only client secrets.
+(`sk_…`). The browser side is n1co.js, which uses only tokens.
 
 - PHP `^8.2` (tested on 8.2 to 8.5) with `ext-curl` and `ext-json`. No runtime dependencies.
 - Typed read-only models; errors as exceptions by status.
@@ -33,7 +33,7 @@ $intent = $n1co->paymentIntents->create([
     'reference' => 'order-8812',
 ]);
 
-// Send only $intent->client_secret to the browser.
+// Send only $intent->intent_token to the browser.
 ```
 
 Never send the secret key to a browser.
@@ -72,7 +72,7 @@ for example `pi_…`) before any request; response bodies over 1 MiB are refused
 ## Integration flow
 
 1. **Your server creates the intent** with `$n1co->paymentIntents->create([...])` and passes its
-   `client_secret` to your page.
+   `intent_token` to your page.
 2. **n1co.js pays it in the browser** (`confirmPayment`), including 3D Secure when n1co asks.
 3. **The `payment_intent.succeeded` webhook is the source of truth.** Fulfil the order there.
    `$n1co->paymentIntents->retrieve($id)` reads the current state.
@@ -80,7 +80,7 @@ for example `pi_…`) before any request; response bodies over 1 MiB are refused
 Cancel an unpaid intent with `$n1co->paymentIntents->cancel($id)`.
 
 To resume an open intent from a new page, retrieve it with the secret key and hand its
-`client_secret` to the browser. `retrieve()` returns it (null for intents created before API 0.12.0):
+`intent_token` to the browser. `retrieve()` returns it (null for intents created before API 0.12.0):
 
 ```php
 try {
@@ -91,14 +91,14 @@ try {
     }
     $intent = $n1co->paymentIntents->retrieve($e->details()['payment_intent']);
 }
-// Send only $intent->client_secret to the browser (cancel the intent and create again if it is null).
+// Send only $intent->intent_token to the browser (cancel the intent and create again if it is null).
 ```
 
 ## Saved cards
 
 ```php
 $session = $n1co->cardSessions->create(['customer' => $customer]);
-// Browser: n1co.js captures the card with $session->client_secret.
+// Browser: n1co.js captures the card with $session->session_token.
 // Then: the card.created webhook, or $n1co->cardSessions->retrieve($session->id)->card
 
 $intent = $n1co->paymentIntents->create([
@@ -313,7 +313,7 @@ redacted from `var_dump()`/`print_r()`, so they stay out of stack traces and err
 
 ## Models
 
-Results are `final readonly` classes with the contract's field names (`$intent->client_secret`,
+Results are `final readonly` classes with the contract's field names (`$intent->intent_token`,
 `$refund->payment_intent`), `fromArray()` and `toArray()`. Fields this version does not know are
 kept in `$extra`. Statuses are string constants (`PaymentIntentStatus::SUCCEEDED`), not enums,
 so a status added to the API later does not break your code.
@@ -322,7 +322,7 @@ so a status added to the API later does not break your code.
 
 | SDK   | API contract |
 | ----- | ------------ |
-| 0.1.x | 0.14.0       |
+| 0.1.x | 0.15.0       |
 
 `N1co::VERSION` and `N1co::CONTRACT_VERSION` hold them. Until 1.0, a minor version may change
 the API surface along with the contract. From 1.0 the SDK follows semantic versioning.

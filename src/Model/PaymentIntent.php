@@ -8,13 +8,13 @@ use N1co\EPay\Internal\Reader;
 use N1co\EPay\ResponseInfo;
 
 /**
- * A payment intent. `client_secret` is set in the answers of paymentIntents->create() (always a string) and
+ * A payment intent. `intent_token` is set in the answers of paymentIntents->create() (always a string) and
  * paymentIntents->retrieve() (null for intents created before API 0.12.0); it is null in the other answers.
  * `card` is the id of the attached card, n1co's payment method id (24 lowercase hexadecimal characters), as sent.
  */
 final readonly class PaymentIntent
 {
-    private const KNOWN = ['id', 'object', 'status', 'amount', 'currency', 'description', 'reference', 'metadata', 'billing', 'page_origins', 'card', 'payment_method', 'cvc_required', 'save_card', 'next_action', 'last_error', 'attempts_remaining', 'authorization_code', 'order_id', 'cancellation_reason', 'refund', 'created_at', 'updated_at', 'succeeded_at', 'canceled_at', 'expires_at', 'client_secret'];
+    private const KNOWN = ['id', 'object', 'status', 'amount', 'currency', 'description', 'reference', 'metadata', 'billing', 'page_origins', 'card', 'payment_method', 'cvc_required', 'save_card', 'next_action', 'last_error', 'attempts_remaining', 'authorization_code', 'order_id', 'cancellation_reason', 'refund', 'created_at', 'updated_at', 'succeeded_at', 'canceled_at', 'expires_at', 'intent_token'];
 
     /**
      * @param string $status One of PaymentIntentStatus::ALL, or a value added to the API later.
@@ -51,7 +51,7 @@ final readonly class PaymentIntent
         public ?string $succeeded_at,
         public ?string $canceled_at,
         public string $expires_at,
-        public ?string $client_secret = null,
+        public ?string $intent_token = null,
         public array $extra = [],
         public ?ResponseInfo $lastResponse = null,
     ) {}
@@ -98,7 +98,7 @@ final readonly class PaymentIntent
             succeeded_at: $r->nullableString('succeeded_at'),
             canceled_at: $r->nullableString('canceled_at'),
             expires_at: $r->string('expires_at'),
-            client_secret: $r->has('client_secret') ? $r->nullableString('client_secret') : null,
+            intent_token: $r->has('intent_token') ? $r->nullableString('intent_token') : null,
             extra: $r->extra(self::KNOWN),
             lastResponse: $lastResponse,
         );
@@ -139,8 +139,8 @@ final readonly class PaymentIntent
             'canceled_at' => $this->canceled_at,
             'expires_at' => $this->expires_at,
         ];
-        if ($this->client_secret !== null) {
-            $data['client_secret'] = $this->client_secret;
+        if ($this->intent_token !== null) {
+            $data['intent_token'] = $this->intent_token;
         }
 
         return $data + $this->extra;

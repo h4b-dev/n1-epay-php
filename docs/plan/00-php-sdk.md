@@ -5,7 +5,7 @@ Status: accepted (0.1.0, unreleased)
 ## Context
 
 Partners integrate the n1co ePay API from their servers with the store's secret key, and from
-the buyer's browser with n1co.js and client secrets. Many partner backends are PHP (plain PHP,
+the buyer's browser with n1co.js and tokens. Many partner backends are PHP (plain PHP,
 Laravel, Symfony, WordPress plugins). Today they call the API with raw HTTP and verify webhook
 signatures by hand. The Node.js SDK (`@n1co/epay`) sets the family's surface and policies; this
 SDK mirrors them in idiomatic PHP.
@@ -101,7 +101,7 @@ backed enums, so a value added by the API passes through. `Event::$data->object`
 exact types in `EventType::ALL` (`Card`, `PaymentIntentEventObject`, `Refund`,
 `WebhookTestObject`); an unknown type, or an object that no longer fits its model, stays the
 decoded array, and `$data->raw` always holds it.
-`PaymentIntent` serves both `PaymentIntent` and `PaymentIntentCreated` (`client_secret` is set
+`PaymentIntent` serves both `PaymentIntent` and `PaymentIntentCreated` (`intent_token` is set
 only by `create()`); `CardSessionCreated` stays separate because it has no `created_at`. A
 response that does not fit its model is a `ServiceException` `invalid_response`, never a
 `TypeError`.
@@ -122,7 +122,7 @@ reject the event. Partners answer `400` only for that exception.
 The secret key, webhook secrets, response bodies and requests are `#[\SensitiveParameter]`;
 `HttpClient`, `Request` and the internal `Reader` redact themselves in `__debugInfo()`. A test
 runs failures in every layer with `zend.exception_ignore_args=0` and checks that traces, dumps,
-messages and `headers()` carry no secret key, webhook secret or client secret.
+messages and `headers()` carry no secret key, webhook secret or token.
 
 ### Tooling
 

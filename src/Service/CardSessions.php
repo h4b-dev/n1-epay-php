@@ -15,7 +15,7 @@ final class CardSessions
     public function __construct(private readonly HttpClient $http) {}
 
     /**
-     * Creates a session for a customer. Pass `client_secret` (shown only once) to n1co.js in the
+     * Creates a session for a customer. Pass `session_token` (shown only once) to n1co.js in the
      * buyer's browser. With `card`, the session updates that saved card (`mode` `update`).
      *
      * @param array{customer: array{id: string, name: string, email: string, phone: string}, page_origins?: list<string>|null, card?: string|null} $params

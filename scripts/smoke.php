@@ -3,7 +3,7 @@
 declare(strict_types=1);
 
 // Manual smoke test against a real environment (not run in CI). Prints ids and statuses only:
-// never the secret key, Authorization headers or client secrets. Every payment intent it
+// never the secret key, Authorization headers or tokens. Every payment intent it
 // creates is canceled, and only the webhook.test event it creates is resent. It refuses the
 // production URL unless N1CO_SMOKE_ALLOW_PROD=1.
 //
@@ -155,13 +155,13 @@ $step('paymentIntents.create (v3 card id)', static function () use ($n1co, $cust
 });
 if ($v3Intent instanceof PaymentIntent) {
     $v3IntentId = $v3Intent->id;
-    $step('paymentIntents.retrieve (client_secret)', static function () use ($n1co, $status, $v3IntentId): string {
+    $step('paymentIntents.retrieve (intent_token)', static function () use ($n1co, $status, $v3IntentId): string {
         $pi = $n1co->paymentIntents->retrieve($v3IntentId);
-        if (!is_string($pi->client_secret)) {
-            throw new \RuntimeException('client_secret is not a string');
+        if (!is_string($pi->intent_token)) {
+            throw new \RuntimeException('intent_token is not a string');
         }
 
-        return sprintf('%s %s status=%s client_secret=string', $status($pi->lastResponse), $pi->id, $pi->status);
+        return sprintf('%s %s status=%s intent_token=string', $status($pi->lastResponse), $pi->id, $pi->status);
     });
     $step('paymentIntents.create (same reference)', static function () use ($n1co, $customer, $orderRef, $v3IntentId): string {
         try {

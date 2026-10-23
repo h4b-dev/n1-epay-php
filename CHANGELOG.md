@@ -8,6 +8,11 @@ All notable changes to this project are documented here. The format is based on
 
 ### Changed
 
+- Contract 0.15.0 (`N1co::CONTRACT_VERSION`). `client_secret` is renamed: `PaymentIntent::$intent_token`
+  (was `$client_secret`) and `CardSessionCreated::$session_token` (was `$client_secret`). The values
+  now read `pi_<24>_token_<32>` and `cs_<24>_token_<32>` (the `_secret_` infix is gone). The
+  error code `missing_client_secret` is now `missing_intent_token`. The setup's `client_secret`,
+  the secret key and the webhook secret do not change. Both fields stay redacted from dumps.
 - Contract 0.14.0 (`N1co::CONTRACT_VERSION`). A card's `id` is n1co's payment method id: 24
   lowercase hexadecimal characters, the value ePay v3 answers and takes as `cardId`. The `card_`
   shape is gone from `Card`, card sessions, `payment_method` and the intent's `card`.
