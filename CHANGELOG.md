@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+### Added
+
+- `N1co::SANDBOX_BASE_URL` (`https://api-epay-sandbox.n1co.shop`), the sandbox environment partners
+  integrate against with their sandbox keys. Production stays the default.
+
 ### Changed
 
 - Contract 0.15.0 (`N1co::CONTRACT_VERSION`). `client_secret` is renamed: `PaymentIntent::$intent_token`

@@ -7,7 +7,7 @@ declare(strict_types=1);
 // creates is canceled, and only the webhook.test event it creates is resent. It refuses the
 // production URL unless N1CO_SMOKE_ALLOW_PROD=1.
 //
-//   N1CO_BASE_URL=https://api-epay.dev.n1co.dev N1CO_SECRET_KEY=sk_... php scripts/smoke.php
+//   N1CO_BASE_URL=https://api-epay-sandbox.n1co.shop N1CO_SECRET_KEY=sk_... php scripts/smoke.php
 
 use N1co\EPay\Exception\ConflictException;
 use N1co\EPay\Exception\InvalidRequestException;

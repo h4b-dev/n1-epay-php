@@ -31,6 +31,8 @@ final class N1co
     public const DEFAULT_BASE_URL = 'https://api-epay.n1co.com';
     /** Development API. */
     public const DEV_BASE_URL = 'https://api-epay.dev.n1co.dev';
+    /** Sandbox API: where partners integrate with their sandbox keys. */
+    public const SANDBOX_BASE_URL = 'https://api-epay-sandbox.n1co.shop';
     public const DEFAULT_TIMEOUT = 30;
     public const DEFAULT_MAX_RETRIES = 2;
 

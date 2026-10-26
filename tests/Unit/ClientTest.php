@@ -113,6 +113,9 @@ final class ClientTest extends TestCase
     {
         yield 'default' => ['https://api-epay.n1co.com', 'https://api-epay.n1co.com'];
         yield 'case and slash' => ['HTTPS://API-EPAY.Dev.N1co.dev/', 'https://api-epay.dev.n1co.dev'];
+        yield 'sandbox' => [N1co::SANDBOX_BASE_URL, 'https://api-epay-sandbox.n1co.shop'];
+        yield 'sandbox case and slash' => ['HTTPS://API-EPAY-SANDBOX.N1co.shop/', 'https://api-epay-sandbox.n1co.shop'];
+        yield 'dev constant' => [N1co::DEV_BASE_URL, 'https://api-epay.dev.n1co.dev'];
         yield 'port and path' => ['https://gw.example:8443/epay/', 'https://gw.example:8443/epay'];
         yield 'localhost' => ['http://LOCALHOST:3000', 'http://localhost:3000'];
         yield 'loopback' => ['http://127.0.0.1:8080/', 'http://127.0.0.1:8080'];

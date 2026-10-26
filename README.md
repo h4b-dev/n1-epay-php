@@ -47,13 +47,16 @@ its reference.
 
 ## Environments
 
+Sandbox: the environment you integrate against, with your sandbox keys. Pass
+`N1co::SANDBOX_BASE_URL` (`https://api-epay-sandbox.n1co.shop`).
+
 Production: omit `base_url` (opens later; the default is the production host). Development: pass
 `https://api-epay.dev.n1co.dev`.
 
 The base URL must use `https`. Plain `http` is accepted only for `http://localhost`,
 `http://127.0.0.1` and `http://[::1]` (any port), to test against a local API.
 
-`N1co::DEFAULT_BASE_URL` and `N1co::DEV_BASE_URL` hold them; `null` means the default.
+`N1co::DEFAULT_BASE_URL`, `N1co::SANDBOX_BASE_URL` and `N1co::DEV_BASE_URL` hold them; `null` means the default.
 
 ## Client options
 
@@ -335,7 +338,7 @@ Needs PHP 8.2+ and Composer (or Docker: `docker run --rm -v "$PWD":/app -w /app 
 composer update
 composer check       # composer.json, style, PHPStan (max), unit and contract tests
 composer sync        # copy the API contract into spec/ (EPAY_API_DIR=<API checkout>)
-N1CO_BASE_URL=https://api-epay.dev.n1co.dev N1CO_SECRET_KEY=sk_… composer smoke   # refuses production
+N1CO_BASE_URL=https://api-epay-sandbox.n1co.shop N1CO_SECRET_KEY=sk_… composer smoke   # refuses production
 ```
 
 ## Support
