@@ -6,6 +6,11 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-10-26
+
+First public release, on contract 0.15.0. The entries below record the changes made while the
+SDK was developed, newest first.
+
 ### Added
 
 - `N1co::SANDBOX_BASE_URL` (`https://api-epay-sandbox.n1co.shop`), the sandbox environment partners
@@ -65,7 +70,7 @@ All notable changes to this project are documented here. The format is based on
 - README: one errors table shape (class, HTTP status, API codes, SDK-only codes), every webhook
   verification code, and the environments and local `http` hosts stated as in the other SDKs.
 
-## [0.1.0] - Unreleased
+### First development version (contract 0.10.0)
 
 ### Added
 
