@@ -28,6 +28,7 @@ final class SpecTest extends TestCase
         'Billing' => Model\Billing::class,
         'NextAction' => Model\NextAction::class,
         'PaymentIntentError' => Model\PaymentIntentError::class,
+        'CardIssuer' => Model\CardIssuer::class,
         'Refund' => Model\Refund::class,
         'RefundError' => Model\RefundError::class,
         'Event' => Model\Event::class,
@@ -42,12 +43,13 @@ final class SpecTest extends TestCase
         'CardSessionMode' => Model\CardSessionMode::class,
         'CardBrand' => Model\CardBrand::class,
         'PaymentIntentStatus' => Model\PaymentIntentStatus::class,
+        'DeclineCode' => Model\DeclineCode::class,
     ];
 
     /** Schemas that are request input (plain arrays in the SDK) or scalars. */
     private const INPUTS = [
         'CardSessionCreateRequest', 'PaymentIntentCreateRequest', 'RefundCreateRequest', 'CustomerInput',
-        'CustomerName', 'CustomerEmail', 'CustomerPhone', 'Metadata', 'PageOrigins', 'Currency',
+        'CustomerName', 'CustomerEmail', 'CustomerPhone', 'Metadata', 'PageOrigins', 'Currency', 'CardBin',
     ];
 
     /** String-constant classes and the enum each mirrors. */
@@ -59,6 +61,7 @@ final class SpecTest extends TestCase
         Model\PaymentIntentStatus::class => '#/components/schemas/PaymentIntentStatus/enum',
         Model\CancellationReason::class => '#/components/schemas/PaymentIntent/properties/cancellation_reason/enum',
         Model\PaymentIntentErrorCode::class => '#/components/schemas/PaymentIntentError/properties/code/enum',
+        Model\DeclineCode::class => '#/components/schemas/DeclineCode/enum',
         Model\RefundStatus::class => '#/components/schemas/Refund/properties/status/enum',
         Model\RefundErrorCode::class => '#/components/schemas/RefundError/properties/code/enum',
         Model\EventType::class => '#/components/schemas/Event/properties/type/enum',

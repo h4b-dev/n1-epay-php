@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: n1co ePay API
-  version: "0.15.0"
+  version: "0.18.0"
   description: |
     Partner-facing payments API in front of the n1co Integration API v3.
     Errors are JSON: `{"error":{"code":"...","message":"...","details":{...}}}`;
@@ -360,6 +360,7 @@ paths:
                     name: Ana Pérez
                     last4: "4242"
                     brand: visa
+                    bin: "424242"
               update:
                 value:
                   session_token: cs_VXBkYXRlU2Vzc2lvbkV4YW1w_token_U2Vzc2lvblRva2VuRXhhbXBsZTAwMDAw
@@ -379,8 +380,10 @@ paths:
                   id: 65f1c0ffee0123456789abcd
                   brand: visa
                   last4: "4242"
+                  bin: "424242"
                   exp_month: 11
                   exp_year: 2031
+                  issuer: {name: Banco Ejemplo, country: SLV}
                 session:
                   id: cs_VXBkYXRlU2Vzc2lvbkV4YW1w
                   mode: update
@@ -400,8 +403,10 @@ paths:
                   id: 65f1c0ffee0123456789abcd
                   brand: visa
                   last4: "4242"
+                  bin: "424242"
                   exp_month: 12
                   exp_year: 2030
+                  issuer: {name: Banco Ejemplo, country: SLV}
                 session:
                   id: cs_U2Vzc2lvbkV4YW1wbGUwMDAx
                   mode: capture
@@ -420,7 +425,9 @@ paths:
             `missing_brand`, `invalid_brand`, `invalid_page_origin`. Card fields are checked in the
             order number, cvc, exp_month, exp_year, name, last4, brand; on
             an update session only cvc, exp_month, exp_year and name are
-            accepted (`last4` and `brand` are unknown fields).
+            accepted (`last4`, `brand` and `bin` are unknown fields). The
+            optional `bin` of a capture session is never refused: a
+            malformed one is dropped and the card saved without it.
           content:
             application/json:
               schema:
@@ -1446,9 +1453,10 @@ paths:
                     card_session: cs_VXBkYXRlU2Vzc2lvbkV4YW1w
                     brand: visa
                     last4: "4242"
+                    bin: "424242"
                     exp_month: 11
                     exp_year: 2031
-                    issuer: {name: Banco Ejemplo, country: SV}
+                    issuer: {name: Banco Ejemplo, country: SLV}
                     fingerprint: 5f0c3b1e9a7d4c2b8e6f0a1d3c5b7e9f1a3c5e7b9d1f3a5c7e9b1d3f5a7c9e1b
                     status: active
                     created_at: "2026-10-16T15:06:12Z"
@@ -1601,9 +1609,10 @@ x-webhooks:
                   card_session: cs_U2Vzc2lvbkV4YW1wbGUwMDAx
                   brand: visa
                   last4: "4242"
+                  bin: "424242"
                   exp_month: 12
                   exp_year: 2030
-                  issuer: {name: Banco Ejemplo, country: SV}
+                  issuer: {name: Banco Ejemplo, country: SLV}
                   fingerprint: 5f0c3b1e9a7d4c2b8e6f0a1d3c5b7e9f1a3c5e7b9d1f3a5c7e9b1d3f5a7c9e1b
                   status: active
                   created_at: "2026-10-16T15:06:12Z"
@@ -1639,9 +1648,10 @@ x-webhooks:
                   card_session: cs_VXBkYXRlU2Vzc2lvbkV4YW1w
                   brand: visa
                   last4: "4242"
+                  bin: "424242"
                   exp_month: 11
                   exp_year: 2031
-                  issuer: {name: Banco Ejemplo, country: SV}
+                  issuer: {name: Banco Ejemplo, country: SLV}
                   fingerprint: 5f0c3b1e9a7d4c2b8e6f0a1d3c5b7e9f1a3c5e7b9d1f3a5c7e9b1d3f5a7c9e1b
                   status: active
                   created_at: "2026-10-16T15:06:12Z"
@@ -2166,6 +2176,35 @@ components:
     CardBrand:
       type: string
       enum: [visa, mastercard, amex, unknown]
+    CardIssuer:
+      type: object
+      description: |
+        The issuing bank as n1co reported it when the card was saved, in
+        the capture answer (since 0.16.0) and in `card.created` and
+        `card.updated`. Always present; each member is `null` when n1co did
+        not report it.
+      required: [name, country]
+      properties:
+        name:
+          type: [string, "null"]
+          description: The issuing bank's name.
+        country:
+          type: [string, "null"]
+          description: |
+            Issuer country code as reported by n1co, uppercased (ISO 3166-1
+            alpha-3, e.g. `SLV`); it is passed through, never converted
+            between code formats.
+          examples: [SLV]
+    CardBin:
+      type: [string, "null"]
+      pattern: "^[0-9]{6}$"
+      description: |
+        The card's BIN: the first six digits of the card number, read by
+        n1co when the card is captured (since 0.17.0). In the capture
+        answer and in `card.created` and `card.updated`; always present,
+        `null` for a card captured before n1co read it. Use it with
+        `issuer` to show the card or to apply your own rules.
+      examples: ["424242"]
     CaptureRequest:
       type: object
       additionalProperties: false
@@ -2204,6 +2243,14 @@ components:
           pattern: "^[0-9]{4}$"
         brand:
           $ref: "#/components/schemas/CardBrand"
+        bin:
+          type: [string, "null"]
+          description: |
+            Optional (since 0.17.0). The first six digits of the card
+            number, added by the tokenization proxy from the number it
+            aliases; the SDK does not send it. Absent or null saves the card
+            with `bin: null`; a value that is not six digits is dropped,
+            never refused. Ignored on the payment intent confirm.
     UpdateCard:
       type: object
       description: |
@@ -2253,7 +2300,7 @@ components:
       properties:
         card:
           type: object
-          required: [id, brand, last4, exp_month, exp_year]
+          required: [id, brand, last4, bin, exp_month, exp_year, issuer]
           properties:
             id:
               type: string
@@ -2272,10 +2319,14 @@ components:
               $ref: "#/components/schemas/CardBrand"
             last4:
               type: string
+            bin:
+              $ref: "#/components/schemas/CardBin"
             exp_month:
               type: integer
             exp_year:
               type: integer
+            issuer:
+              $ref: "#/components/schemas/CardIssuer"
         session:
           type: object
           required: [id, mode, status]
@@ -2417,7 +2468,7 @@ components:
         The card as sent in `card.created` and `card.updated`. Webhooks never carry the
         cardholder name, the customer, or its name, email, phone or
         addresses.
-      required: [id, card_session, brand, last4, exp_month, exp_year, issuer, fingerprint, status, created_at]
+      required: [id, card_session, brand, last4, bin, exp_month, exp_year, issuer, fingerprint, status, created_at]
       properties:
         id:
           type: string
@@ -2432,19 +2483,14 @@ components:
         last4:
           type: string
           description: As declared by the n1co SDK's card element (n1co returns no masked number). For display only.
+        bin:
+          $ref: "#/components/schemas/CardBin"
         exp_month:
           type: integer
         exp_year:
           type: integer
         issuer:
-          type: object
-          required: [name, country]
-          properties:
-            name:
-              type: [string, "null"]
-            country:
-              type: [string, "null"]
-              description: Country code reported by n1co, uppercased.
+          $ref: "#/components/schemas/CardIssuer"
         fingerprint:
           type: string
           pattern: "^[0-9a-f]{64}$"
@@ -2694,6 +2740,24 @@ components:
               type: string
               format: date-time
               description: 10 minutes after the authentication was issued.
+    DeclineCode:
+      type: string
+      enum: [INSUFFICIENT_FUNDS, LIMIT_EXCEEDED, EXPIRED_CARD, INCORRECT_CVC, INVALID_NUMBER, INVALID_AMOUNT, CARD_NOT_ACTIVE, TRANSACTION_NOT_ALLOWED, LOST_OR_STOLEN_CARD, CALL_ISSUER, ISSUER_UNAVAILABLE, FRAUD_PREVENT]
+      description: |
+        Why n1co declined a charge (since 0.18.0): ePay's own names,
+        whatever processor answered. `INSUFFICIENT_FUNDS`: the card has
+        insufficient funds. `LIMIT_EXCEEDED`: the card's limit or its daily
+        transaction limit was exceeded. `EXPIRED_CARD`: the card is expired
+        or the expiration date is wrong. `INCORRECT_CVC`: the security code
+        is wrong. `INVALID_NUMBER`: the issuer does not know the card
+        number. `INVALID_AMOUNT`: the issuer refused the amount.
+        `CARD_NOT_ACTIVE`: the card is not active or not enabled for online
+        payments. `TRANSACTION_NOT_ALLOWED`: the card does not allow this
+        payment. `LOST_OR_STOLEN_CARD`: the card is reported lost or stolen.
+        `CALL_ISSUER`: the issuer declined without more detail; the
+        cardholder should call it. `ISSUER_UNAVAILABLE`: the issuer did not
+        answer; retry later. `FRAUD_PREVENT`: the charge did not pass the
+        fraud checks.
     PaymentIntentError:
       type: object
       required: [code, decline_code, message]
@@ -2725,9 +2789,15 @@ components:
             does not count and every later confirm meets the same answer:
             cancel the intent.
         decline_code:
-          type: [string, "null"]
-          pattern: "^[A-Z][A-Z0-9_]{0,63}$"
-          description: n1co's decline code for `card_declined`, when it reports one.
+          description: |
+            Why the charge was declined, for `card_declined`, when n1co
+            reports a known reason; otherwise `null`. Later versions may add
+            values: treat one you do not know as a plain decline.
+            `LOST_OR_STOLEN_CARD` is for your server only (never show it to
+            the buyer): what the n1co SDK sees has `null` in its place.
+          oneOf:
+            - $ref: "#/components/schemas/DeclineCode"
+            - type: "null"
         message:
           type: string
           description: Our own English message for the code; never the provider's text.
@@ -2855,7 +2925,7 @@ components:
       type: object
       description: |
         What the n1co SDK sees. It never carries metadata, reference, billing, card ids, `order_id` or
-        `authorization_code`.
+        `authorization_code`, and its `last_error.decline_code` is `null` for a lost or stolen card.
       required: [id, object, status, amount, currency, description, payment_method, cvc_required, next_action, last_error, attempts_remaining, refund, expires_at]
       properties:
         id:
