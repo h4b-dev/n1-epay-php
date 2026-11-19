@@ -11,11 +11,13 @@ use N1co\EPay\Internal\Reader;
  */
 final readonly class Card
 {
-    private const KNOWN = ['id', 'card_session', 'brand', 'last4', 'exp_month', 'exp_year', 'issuer', 'fingerprint', 'status', 'created_at'];
+    private const KNOWN = ['id', 'card_session', 'brand', 'last4', 'bin', 'exp_month', 'exp_year', 'issuer', 'fingerprint', 'status', 'created_at'];
 
     /**
      * @param string $brand One of CardBrand::ALL, or a value added to the API later.
      * @param string $status One of CardStatus::ALL, or a value added to the API later.
+     * @param ?string $bin The first six digits of the number; null for a card saved before n1co read
+     *     it, and in an event recorded before API 0.17.0.
      * @param array<string, mixed> $extra Fields this SDK version does not know, kept as received.
      */
     public function __construct(
@@ -23,6 +25,7 @@ final readonly class Card
         public string $card_session,
         public string $brand,
         public string $last4,
+        public ?string $bin,
         public int $exp_month,
         public int $exp_year,
         public CardIssuer $issuer,
@@ -52,6 +55,7 @@ final readonly class Card
             card_session: $r->string('card_session'),
             brand: $r->string('brand'),
             last4: $r->string('last4'),
+            bin: $r->has('bin') ? $r->nullableString('bin') : null,
             exp_month: $r->int('exp_month'),
             exp_year: $r->int('exp_year'),
             issuer: CardIssuer::read($r->object('issuer')),
@@ -74,6 +78,7 @@ final readonly class Card
             'card_session' => $this->card_session,
             'brand' => $this->brand,
             'last4' => $this->last4,
+            'bin' => $this->bin,
             'exp_month' => $this->exp_month,
             'exp_year' => $this->exp_year,
             'issuer' => $this->issuer->toArray(),

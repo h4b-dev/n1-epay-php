@@ -15,6 +15,8 @@ final readonly class PaymentIntentError
 
     /**
      * @param string $code One of PaymentIntentErrorCode::ALL, or a value added to the API later.
+     * @param ?string $decline_code For `card_declined`, one of DeclineCode::ALL (or a value added to the
+     *     API later) when n1co reports a known reason; otherwise null.
      * @param array<string, mixed> $extra Fields this SDK version does not know, kept as received.
      */
     public function __construct(

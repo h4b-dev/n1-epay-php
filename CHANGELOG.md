@@ -6,6 +6,26 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-18
+
+### Added
+
+- `Model\DeclineCode`: string constants (and `ALL`) for `PaymentIntentError::$decline_code`.
+- Contract 0.17.0. `Card::$bin` (`bin` of `card.created` and `card.updated`): the first six digits
+  of the number, null for a card saved before. It is the fifth constructor argument of `Card`.
+
+### Changed
+
+- Contract 0.18.0 (`N1co::CONTRACT_VERSION`). `PaymentIntentError::$decline_code` is ePay's own
+  reason for a `card_declined`, the same whatever processor answered: `INSUFFICIENT_FUNDS`,
+  `LIMIT_EXCEEDED`, `EXPIRED_CARD`, `INCORRECT_CVC`, `INVALID_NUMBER`, `INVALID_AMOUNT`,
+  `CARD_NOT_ACTIVE`, `TRANSACTION_NOT_ALLOWED`, `LOST_OR_STOLEN_CARD`, `CALL_ISSUER`,
+  `ISSUER_UNAVAILABLE`, `FRAUD_PREVENT`. Before, it was n1co's code as sent (`CARD_EXPIRED` is
+  now `EXPIRED_CARD`) and a processor code such as `51` arrived as null. It stays a `?string`: a
+  value added to the API later is passed through.
+- Contract 0.16.0. `CardIssuer` is a shared schema of the contract; `CardIssuer::$country` is
+  n1co's code uppercased, ISO 3166-1 alpha-3 (`SLV`). No model changes.
+
 ## [0.1.0] - 2026-10-26
 
 First public release, on contract 0.15.0. The entries below record the changes made while the

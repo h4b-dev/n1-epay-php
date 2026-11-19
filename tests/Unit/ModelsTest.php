@@ -6,6 +6,7 @@ namespace N1co\EPay\Tests\Unit;
 
 use N1co\EPay\Exception\ServiceException;
 use N1co\EPay\Model\Card;
+use N1co\EPay\Model\DeclineCode;
 use N1co\EPay\Model\EventList;
 use N1co\EPay\Model\PaymentIntent;
 use N1co\EPay\Model\PaymentIntentError;
@@ -63,7 +64,27 @@ final class ModelsTest extends TestCase
         self::assertNull($intent->next_action);
 
         $card = Card::fromArray(Spec::map(Spec::map(Examples::webhooks()['card.created']['data'] ?? null)['object'] ?? null));
-        self::assertSame('SV', $card->issuer->country);
+        self::assertSame('SLV', $card->issuer->country);
+        self::assertSame('424242', $card->bin);
+    }
+
+    public function testACardOfAnEventRecordedBeforeTheBinHasNone(): void
+    {
+        $data = Spec::map(Spec::map(Examples::webhooks()['card.created']['data'] ?? null)['object'] ?? null);
+        unset($data['bin']);
+        self::assertNull(Card::fromArray($data)->bin);
+        self::assertNull(Card::fromArray(['bin' => null] + $data)->bin);
+    }
+
+    public function testKnowsTheDeclineCodesAndKeepsUnknownOnes(): void
+    {
+        $error = PaymentIntentError::fromArray(['code' => 'card_declined', 'decline_code' => 'INSUFFICIENT_FUNDS', 'message' => 'The card has insufficient funds.']);
+        self::assertSame(DeclineCode::INSUFFICIENT_FUNDS, $error->decline_code);
+        self::assertContains($error->decline_code, DeclineCode::ALL);
+        $later = PaymentIntentError::fromArray(['code' => 'card_declined', 'decline_code' => 'ADDED_LATER', 'message' => 'x']);
+        self::assertSame('ADDED_LATER', $later->decline_code);
+        self::assertSame('ADDED_LATER', $later->toArray()['decline_code']);
+        self::assertNull(PaymentIntentError::fromArray(['code' => 'card_declined', 'decline_code' => null, 'message' => 'x'])->decline_code);
     }
 
     public function testThrowsUnexpectedValueOnAWrongShape(): void

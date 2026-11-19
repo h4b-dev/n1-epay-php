@@ -82,6 +82,32 @@ for example `pi_…`) before any request; response bodies over 1 MiB are refused
 
 Cancel an unpaid intent with `$n1co->paymentIntents->cancel($id)`.
 
+### Declines
+
+A failed attempt is not an exception: the intent, and its `payment_intent.payment_failed` event,
+carry `last_error` (`code`, `decline_code`, `message`). With `code` `card_declined`, `decline_code`
+says why when n1co reports a known reason, the same whatever processor answered; otherwise it is
+null.
+
+```php
+use N1co\EPay\Model\DeclineCode;
+use N1co\EPay\Model\PaymentIntentErrorCode;
+
+$error = $intent->last_error;
+if ($error?->code === PaymentIntentErrorCode::CARD_DECLINED) {
+    $advice = match ($error->decline_code) {
+        DeclineCode::INSUFFICIENT_FUNDS, DeclineCode::LIMIT_EXCEEDED => 'another card',
+        DeclineCode::LOST_OR_STOLEN_CARD => 'a plain decline: never tell the buyer',
+        default => 'a plain decline', // null, or a value added after this SDK version
+    };
+}
+```
+
+`DeclineCode::ALL`: `INSUFFICIENT_FUNDS`, `LIMIT_EXCEEDED`, `EXPIRED_CARD`, `INCORRECT_CVC`,
+`INVALID_NUMBER`, `INVALID_AMOUNT`, `CARD_NOT_ACTIVE`, `TRANSACTION_NOT_ALLOWED`,
+`LOST_OR_STOLEN_CARD`, `CALL_ISSUER`, `ISSUER_UNAVAILABLE` and `FRAUD_PREVENT`. n1co.js translates
+`message` for the buyer.
+
 To resume an open intent from a new page, retrieve it with the secret key and hand its
 `intent_token` to the browser. `retrieve()` returns it (null for intents created before API 0.12.0):
 
@@ -325,7 +351,7 @@ so a status added to the API later does not break your code.
 
 | SDK   | API contract |
 | ----- | ------------ |
-| 0.1.x | 0.15.0       |
+| 0.1.x | 0.18.0       |
 
 `N1co::VERSION` and `N1co::CONTRACT_VERSION` hold them. Until 1.0, a minor version may change
 the API surface along with the contract. From 1.0 the SDK follows semantic versioning.
