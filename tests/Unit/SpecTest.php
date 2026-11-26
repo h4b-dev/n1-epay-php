@@ -49,7 +49,7 @@ final class SpecTest extends TestCase
     /** Schemas that are request input (plain arrays in the SDK) or scalars. */
     private const INPUTS = [
         'CardSessionCreateRequest', 'PaymentIntentCreateRequest', 'RefundCreateRequest', 'CustomerInput',
-        'CustomerName', 'CustomerEmail', 'CustomerPhone', 'Metadata', 'PageOrigins', 'Currency', 'CardBin',
+        'CustomerName', 'CustomerEmail', 'CustomerPhone', 'Metadata', 'PageOrigins', 'Currency', 'CardBin', 'CardName',
     ];
 
     /** String-constant classes and the enum each mirrors. */

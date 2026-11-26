@@ -11,13 +11,16 @@ use N1co\EPay\Internal\Reader;
  */
 final readonly class Card
 {
-    private const KNOWN = ['id', 'card_session', 'brand', 'last4', 'bin', 'exp_month', 'exp_year', 'issuer', 'fingerprint', 'status', 'created_at'];
+    private const KNOWN = ['id', 'card_session', 'brand', 'last4', 'bin', 'exp_month', 'exp_year', 'issuer', 'name', 'fingerprint', 'status', 'created_at'];
 
     /**
      * @param string $brand One of CardBrand::ALL, or a value added to the API later.
      * @param string $status One of CardStatus::ALL, or a value added to the API later.
      * @param ?string $bin The first six digits of the number; null for a card saved before n1co read
      *     it, and in an event recorded before API 0.17.0.
+     * @param ?string $name The cardholder name stored with the card (the one typed, or after an update
+     *     the one typed then); null for a card stored without one, and in an event recorded before
+     *     API 0.19.0.
      * @param array<string, mixed> $extra Fields this SDK version does not know, kept as received.
      */
     public function __construct(
@@ -29,6 +32,7 @@ final readonly class Card
         public int $exp_month,
         public int $exp_year,
         public CardIssuer $issuer,
+        public ?string $name,
         public string $fingerprint,
         public string $status,
         public string $created_at,
@@ -59,6 +63,7 @@ final readonly class Card
             exp_month: $r->int('exp_month'),
             exp_year: $r->int('exp_year'),
             issuer: CardIssuer::read($r->object('issuer')),
+            name: $r->has('name') ? $r->nullableString('name') : null,
             fingerprint: $r->string('fingerprint'),
             status: $r->string('status'),
             created_at: $r->string('created_at'),
@@ -82,6 +87,7 @@ final readonly class Card
             'exp_month' => $this->exp_month,
             'exp_year' => $this->exp_year,
             'issuer' => $this->issuer->toArray(),
+            'name' => $this->name,
             'fingerprint' => $this->fingerprint,
             'status' => $this->status,
             'created_at' => $this->created_at,

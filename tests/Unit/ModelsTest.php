@@ -66,6 +66,7 @@ final class ModelsTest extends TestCase
         $card = Card::fromArray(Spec::map(Spec::map(Examples::webhooks()['card.created']['data'] ?? null)['object'] ?? null));
         self::assertSame('SLV', $card->issuer->country);
         self::assertSame('424242', $card->bin);
+        self::assertSame('Ana Pérez', $card->name);
     }
 
     public function testACardOfAnEventRecordedBeforeTheBinHasNone(): void
@@ -74,6 +75,16 @@ final class ModelsTest extends TestCase
         unset($data['bin']);
         self::assertNull(Card::fromArray($data)->bin);
         self::assertNull(Card::fromArray(['bin' => null] + $data)->bin);
+    }
+
+    public function testACardOfAnEventRecordedBeforeTheNameHasNone(): void
+    {
+        $data = Spec::map(Spec::map(Examples::webhooks()['card.created']['data'] ?? null)['object'] ?? null);
+        unset($data['name']);
+        $card = Card::fromArray($data);
+        self::assertNull($card->name);
+        self::assertArrayNotHasKey('name', $card->extra);
+        self::assertNull(Card::fromArray(['name' => null] + $data)->name);
     }
 
     public function testKnowsTheDeclineCodesAndKeepsUnknownOnes(): void

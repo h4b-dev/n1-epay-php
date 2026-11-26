@@ -6,6 +6,15 @@ All notable changes to this project are documented here. The format is based on
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-26
+
+### Added
+
+- Contract 0.19.0 (`N1co::CONTRACT_VERSION`). `Card::$name` (`name` of `card.created` and
+  `card.updated`): the cardholder name stored with the card, the one typed (after an update, the
+  one typed then, or the stored one when none was); null for a card stored without one and in an
+  event recorded before 0.19.0. It is the ninth constructor argument of `Card`, after `$issuer`.
+
 ## [0.2.0] - 2026-11-18
 
 ### Added
