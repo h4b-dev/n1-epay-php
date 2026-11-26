@@ -1,7 +1,7 @@
 openapi: 3.1.0
 info:
   title: n1co ePay API
-  version: "0.18.0"
+  version: "0.19.0"
   description: |
     Partner-facing payments API in front of the n1co Integration API v3.
     Errors are JSON: `{"error":{"code":"...","message":"...","details":{...}}}`;
@@ -384,6 +384,7 @@ paths:
                   exp_month: 11
                   exp_year: 2031
                   issuer: {name: Banco Ejemplo, country: SLV}
+                  name: Ana Pérez
                 session:
                   id: cs_VXBkYXRlU2Vzc2lvbkV4YW1w
                   mode: update
@@ -407,6 +408,7 @@ paths:
                   exp_month: 12
                   exp_year: 2030
                   issuer: {name: Banco Ejemplo, country: SLV}
+                  name: Ana Pérez
                 session:
                   id: cs_U2Vzc2lvbkV4YW1wbGUwMDAx
                   mode: capture
@@ -624,7 +626,9 @@ paths:
         Nothing is saved here either way. n1co identifies the buyer by
         email and gives the same card the same payment method id, so
         `save_card: false` on a card the buyer saved with that email (here
-        or in v3) gets it deleted after the charge, as in v3.
+        or in v3) gets it deleted after the charge, as in v3: a card of
+        the customer saved here becomes `unavailable` with that charge
+        (see `POST /v1/payment_intents/confirm`).
 
         `amount` is in minor units of `currency`. Only currencies with two
         decimal places are supported. Once the store's currency is known
@@ -971,15 +975,33 @@ paths:
         its security code (see below). With a full `card`, a new card typed in the SDK's card element, whose
         `number` and `cvc` the proxy replaced with vault aliases (validated
         as in `/v1/capture`), is charged for this attempt only and is never
-        saved: a card the customer already saved (same expiry, not expired)
-        is charged as that saved card; otherwise it is registered at n1co
-        as reusable, or single use when the intent has `save_card: false`
-        (n1co then deletes it after the charge, and with it a card the
-        buyer saved with the same email), and is not saved here. `card`
+        saved here: it is always registered at n1co, as reusable, or single
+        use when the intent has `save_card: false`, and charged by the id
+        n1co answers, exactly as an ePay v3 partner registers and charges
+        a card the buyer types. `card`
         must be that object: a
         saved card id is refused (`invalid_card`); saved cards are attached
         by your server. `billing`, when given, replaces the intent's
         billing.
+
+        A typed card the customer already has saved is registered like any
+        other. n1co identifies the buyer by email, gives the same card the
+        same payment method id and overwrites what it had stored for it
+        (expiry, cardholder name, security code, single use), as it does
+        for a v3 partner. When the id n1co answers is a card of the
+        intent's customer saved here, the intent's `card` is that id (with
+        `payment_method.saved` `false`: the card was typed), and the saved
+        card takes the typed expiry and cardholder name, and brand, issuer
+        and BIN as n1co reports them, whatever the charge's result; an
+        `unavailable` one is `active` again. No `card.updated` is sent.
+        With `save_card: false` n1co deletes the payment method after the
+        successful charge and the saved card becomes `unavailable` here
+        with it; when that charge does not succeed the card stays `active`
+        but flagged single use at n1co until it is registered again, so a
+        later charge by its id can be its last. When n1co answers the
+        charge that it does not know the id it just registered, the
+        attempt fails with `last_error.code` `card_unavailable` and the
+        saved card becomes `unavailable`.
 
         `{"cvc": "<alias>"}` alone in `card` is the attached card's security
         code, typed in n1co's frames and replaced with a vault alias by the
@@ -999,8 +1021,8 @@ paths:
         answer about it (`401`/`403`, `429`, `5xx`, no answer, a request
         never sent) the attempt is given back with `503` (see
         `ChargeUnavailable`). A new card equal to the attached one on an
-        intent with `cvc_required` is charged as the saved card after its
-        `card.cvc` is registered the same way.
+        intent with `cvc_required` is a typed card like any other: it is
+        registered at n1co with the `card.cvc` typed with it.
 
         The answer is `200` with the client view for every attempt whose
         outcome is known: `succeeded`, `requires_action` (n1co requires 3D
@@ -1457,6 +1479,7 @@ paths:
                     exp_month: 11
                     exp_year: 2031
                     issuer: {name: Banco Ejemplo, country: SLV}
+                    name: Ana Pérez
                     fingerprint: 5f0c3b1e9a7d4c2b8e6f0a1d3c5b7e9f1a3c5e7b9d1f3a5c7e9b1d3f5a7c9e1b
                     status: active
                     created_at: "2026-10-16T15:06:12Z"
@@ -1584,8 +1607,9 @@ x-webhooks:
     post:
       summary: A card was captured
       description: |
-        Sent when a capture succeeds. `data.object` is the card, without the
-        cardholder name or the customer; `card_session` is the session that
+        Sent when a capture succeeds. `data.object` is the card, with the
+        cardholder name (since 0.19.0) and without the customer;
+        `card_session` is the session that
         captured it, which attributes the card to the customer you created
         the session for.
       parameters:
@@ -1613,6 +1637,7 @@ x-webhooks:
                   exp_month: 12
                   exp_year: 2030
                   issuer: {name: Banco Ejemplo, country: SLV}
+                  name: Ana Pérez
                   fingerprint: 5f0c3b1e9a7d4c2b8e6f0a1d3c5b7e9f1a3c5e7b9d1f3a5c7e9b1d3f5a7c9e1b
                   status: active
                   created_at: "2026-10-16T15:06:12Z"
@@ -1625,7 +1650,7 @@ x-webhooks:
       description: |
         Sent when an update session (`POST /v1/card_sessions` with `card`)
         updated a saved card. `data.object` has the shape of
-        `card.created`'s, with the new expiry; `card_session` is the update
+        `card.created`'s, with the new expiry and name; `card_session` is the update
         session and `created_at` is still when the card was first saved.
       parameters:
         - {name: webhook-id, in: header, required: true, schema: {type: string}}
@@ -1652,6 +1677,7 @@ x-webhooks:
                   exp_month: 11
                   exp_year: 2031
                   issuer: {name: Banco Ejemplo, country: SLV}
+                  name: Ana Pérez
                   fingerprint: 5f0c3b1e9a7d4c2b8e6f0a1d3c5b7e9f1a3c5e7b9d1f3a5c7e9b1d3f5a7c9e1b
                   status: active
                   created_at: "2026-10-16T15:06:12Z"
@@ -2205,6 +2231,17 @@ components:
         `null` for a card captured before n1co read it. Use it with
         `issuer` to show the card or to apply your own rules.
       examples: ["424242"]
+    CardName:
+      type: [string, "null"]
+      maxLength: 60
+      description: |
+        The cardholder name stored with the card (since 0.19.0): the one
+        typed at capture or, after an update, the one typed then (the
+        stored one when none was). In the capture answer and in
+        `card.created` and `card.updated`; always present, `null` for a
+        card stored without one. Events recorded before 0.19.0 do not
+        have it.
+      examples: [Ana Pérez]
     CaptureRequest:
       type: object
       additionalProperties: false
@@ -2300,7 +2337,7 @@ components:
       properties:
         card:
           type: object
-          required: [id, brand, last4, bin, exp_month, exp_year, issuer]
+          required: [id, brand, last4, bin, exp_month, exp_year, issuer, name]
           properties:
             id:
               type: string
@@ -2327,6 +2364,8 @@ components:
               type: integer
             issuer:
               $ref: "#/components/schemas/CardIssuer"
+            name:
+              $ref: "#/components/schemas/CardName"
         session:
           type: object
           required: [id, mode, status]
@@ -2465,10 +2504,10 @@ components:
     CardEventObject:
       type: object
       description: |
-        The card as sent in `card.created` and `card.updated`. Webhooks never carry the
-        cardholder name, the customer, or its name, email, phone or
-        addresses.
-      required: [id, card_session, brand, last4, bin, exp_month, exp_year, issuer, fingerprint, status, created_at]
+        The card as sent in `card.created` and `card.updated`, the
+        cardholder name included (since 0.19.0). Webhooks never carry the
+        customer, or its name, email, phone or addresses.
+      required: [id, card_session, brand, last4, bin, exp_month, exp_year, issuer, name, fingerprint, status, created_at]
       properties:
         id:
           type: string
@@ -2491,6 +2530,8 @@ components:
           type: integer
         issuer:
           $ref: "#/components/schemas/CardIssuer"
+        name:
+          $ref: "#/components/schemas/CardName"
         fingerprint:
           type: string
           pattern: "^[0-9a-f]{64}$"
@@ -2503,9 +2544,12 @@ components:
           enum: [active, unavailable]
           description: |
             `unavailable` when n1co no longer knows the card's payment method
-            (a charge answered that the card does not exist): it cannot be
-            charged (`409 card_unavailable`) until the customer saves the
-            same card again, which makes it `active`.
+            (a charge answered that the card does not exist, or n1co
+            deleted it after the charge of an intent with `save_card:
+            false` on which the customer typed it): it cannot be
+            charged (`409 card_unavailable`) until n1co registers the same
+            card again for the customer (a capture session, or the card
+            typed at a checkout), which makes it `active`.
         created_at:
           type: string
           format: date-time
@@ -2647,8 +2691,9 @@ components:
             partner's `card.singleUse` (inverted): `true` registers it as
             reusable for the buyer, `false` as single use, deleted by n1co
             after its first successful charge (a card the buyer saved with
-            the same email is the same payment method and is deleted too).
-            Nothing is saved here either way.
+            the same email is the same payment method and is deleted too:
+            one saved here becomes `unavailable`). Nothing is saved here
+            either way.
     PaymentIntentConfirmRequest:
       type: object
       additionalProperties: false
@@ -2662,8 +2707,9 @@ components:
             attached card's security code (required when the intent has
             `cvc_required`): it is registered at n1co, then the attached
             card is charged. A full card object is a new card typed in the
-            SDK's card element, charged for this attempt only and never
-            saved. A saved card id is not accepted.
+            SDK's card element, registered at n1co and charged for this
+            attempt only, and never saved here. A saved card id is not
+            accepted.
           oneOf:
             - $ref: "#/components/schemas/CaptureCard"
             - $ref: "#/components/schemas/SavedCardCode"
@@ -2718,7 +2764,7 @@ components:
           description: Null for a card saved with ePay v3.
         saved:
           type: boolean
-          description: True for a saved card (the attached card, a card saved with ePay v3, or the customer's saved card charged in place of the same card typed again); false for a new card.
+          description: True for a saved card charged by its id (the attached card, or a card saved with ePay v3); false for a card typed in the card element, also when the customer has it saved here and `card` shows its id.
     NextAction:
       type: object
       required: [type, three_ds]
@@ -2768,7 +2814,8 @@ components:
           description: |
             `card_declined`: n1co declined the charge. `card_rejected`: n1co
             refused to register the new card. `card_unavailable`: n1co no
-            longer knows the saved card (it is now `unavailable`), or does
+            longer knows the saved card, charged by its id or typed and
+            registered just before (it is now `unavailable`), or does
             not know the attached card saved with ePay v3 (unknown, deleted
             or of another store); confirm with a new card. `card_update_failed`: n1co refused the
             security code typed for the saved card (nothing was charged);
@@ -2843,17 +2890,21 @@ components:
             current or last attempt. At creation, the attached card
             (`payment_method` on create, as sent), or null when none
             was attached. After an attempt with a new card, null (checkout
-            never saves a card), unless the customer had that card saved:
-            then that saved card's id. A later confirm without a card
-            charges the attached card again and shows it here.
+            never saves a card), unless n1co answered, for its
+            registration, the id of a card the customer has saved here:
+            then that saved card's id (the card takes what was typed, see
+            `POST /v1/payment_intents/confirm`). A later confirm without a
+            card charges the attached card again and shows it here.
         payment_method:
           oneOf:
             - $ref: "#/components/schemas/PaymentMethodSummary"
             - type: "null"
           description: |
-            Display summary of the card in `card` (`saved: true`), or of the
-            new card typed for the current or last attempt (`saved: false`);
-            null when no card was attached and no attempt was made.
+            Display summary of the saved card in `card` charged by its id
+            (`saved: true`), or of the new card typed for the current or
+            last attempt (`saved: false`, also when `card` shows the
+            customer has it saved); null when no card was attached and no
+            attempt was made.
         cvc_required:
           type: boolean
           description: Whether a confirm that charges the attached card needs its security code (`card.cvc`).
